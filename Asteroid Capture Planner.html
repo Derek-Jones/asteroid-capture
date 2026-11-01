@@ -1,0 +1,797 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Asteroid Capture Planner</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: flight-dynamics console — catalogue rail | orbit view | analysis column, with burn plan, approach plot and ground map below */
+:root{
+  --bg:#0d1220; --panel:#141b2d; --panel2:#1a2338; --line:#27314b; --fg:#dfe5f2; --muted:#8e98b2;
+  --accent:#f2a93b; --cool:#6fc3df; --earth:#3dff72; --sel:#ff3b3b; --ok:#5cc28d; --bad:#e8695e; --warn:#e0bb4c; --sun:#ffd27a;
+  --display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){
+  --bg:#eef1f6; --panel:#ffffff; --panel2:#f5f7fb; --line:#d4dae6; --fg:#16203a; --muted:#59647e;
+  --accent:#b5650a; --cool:#1b7ca1; --earth:#00a83a; --sel:#e0101e; --ok:#1f8250; --bad:#b63a2f; --warn:#94700d; --sun:#d08a12; color-scheme:light}}
+:root[data-theme="light"]{
+  --bg:#eef1f6; --panel:#ffffff; --panel2:#f5f7fb; --line:#d4dae6; --fg:#16203a; --muted:#59647e;
+  --accent:#b5650a; --cool:#1b7ca1; --earth:#00a83a; --sel:#e0101e; --ok:#1f8250; --bad:#b63a2f; --warn:#94700d; --sun:#d08a12; color-scheme:light}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:14px;line-height:1.45;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:14px 40px}
+h1,h2,h3{font-family:var(--display);font-weight:600;letter-spacing:.02em;margin:0;text-wrap:balance}
+h1{font-size:30px;line-height:1}
+h2{font-size:19px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.mono,td.n,.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 28px;margin-bottom:12px}
+header p{margin:0;color:var(--muted);max-width:70ch}
+.assump{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:flex-end;padding:10px 12px}
+.settings{margin-top:12px}
+.vbar{padding:7px 12px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}
+.vbar label{display:flex;align-items:center;gap:5px}
+.vbar select,.vbar input[type=date]{font:12px var(--mono);background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:3px 5px}
+.vbar input[type=range]{flex:1 1 140px;min-width:100px}
+details.verdict>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px}
+details.verdict>summary::-webkit-details-marker{display:none}
+details.verdict>summary::after{content:"Hide";font:11px var(--mono);color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:1px 6px}
+details.verdict:not([open])>summary::after{content:"Show details"}
+details.verdict:not([open]){margin-bottom:0}
+details.verdict>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.vbody{margin-top:10px}
+.assump label{display:flex;flex-direction:column;gap:2px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.assump input{font-family:var(--mono);font-size:13px;width:110px;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:4px 6px}
+.assump input[type=date]{width:140px}
+.assump .src{font-size:11px;color:var(--muted);flex-basis:100%}
+.grid{display:grid;grid-template-columns:290px minmax(0,1fr) 380px;gap:12px;align-items:start}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;min-width:0}
+.card>.hd{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line)}
+.card>.bd{padding:10px 12px}
+/* catalogue */
+#list{list-style:none;margin:0;padding:0;max-height:520px;overflow:auto}
+.listctl{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}
+.listctl input[type=search]{flex:1 1 140px;min-width:0;font:12px var(--body);background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:4px 7px}
+.listctl label{display:flex;align-items:center;gap:4px}
+.listctl select{font:12px var(--body);background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:3px 5px}
+.rotset{display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.rotset input{width:90px;font:12px var(--mono);background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:3px 6px}
+#list li{border-bottom:1px solid var(--line)}
+#list button{all:unset;box-sizing:border-box;display:grid;grid-template-columns:10px 1fr auto;gap:2px 8px;width:100%;padding:8px 12px;cursor:pointer}
+#list button:hover{background:var(--panel2)}
+#list button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+#list li.sel button{background:var(--panel2);box-shadow:inset 3px 0 0 var(--accent)}
+#list .dot{width:8px;height:8px;border-radius:50%;margin-top:6px;background:var(--cool)}
+#list li.ex .dot{background:var(--muted);opacity:.5}
+#list .nm{font-weight:600}
+#list li.ex .nm{color:var(--muted)}
+#list .meta{grid-column:2/4;font-size:12px;color:var(--muted);font-family:var(--mono)}
+.pill{font-family:var(--mono);font-size:10.5px;padding:1px 6px;border-radius:9px;border:1px solid currentColor;white-space:nowrap;align-self:start}
+.pill.ok{color:var(--ok)} .pill.bad{color:var(--bad)} .pill.mut{color:var(--muted)} .pill.warn{color:var(--warn)}
+/* viewer */
+#viewWrap{position:relative;height:560px;overflow:hidden;border-radius:0 0 6px 6px}
+#view{width:100%;height:100%;display:block}
+#labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+#labels span{position:absolute;font-family:var(--mono);font-size:11px;color:var(--muted);transform:translate(6px,-50%);white-space:nowrap}
+#labels span.ast{color:var(--cool)} #labels span.sel{color:var(--accent);font-weight:500}
+.vctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.vctl input[type=range]{width:180px;accent-color:var(--accent)}
+button.b{font:500 12px var(--body);background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:4px 10px;cursor:pointer}
+button.b:hover{border-color:var(--accent)} button.b:focus-visible{outline:2px solid var(--accent)}
+.legend{position:absolute;left:10px;bottom:8px;font-size:11px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;pointer-events:none}
+.legend i{display:inline-block;width:14px;height:2px;vertical-align:middle;margin-right:4px}
+#dateTag{position:absolute;right:10px;top:8px;font-family:var(--mono);font-size:12px;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:2px 8px}
+/* analysis */
+.verdict{border-radius:5px;padding:10px 12px;margin-bottom:10px;border:1px solid var(--line);border-left:4px solid var(--muted)}
+.verdict.ok{border-left-color:var(--ok)} .verdict.bad{border-left-color:var(--bad)} .verdict.mut{border-left-color:var(--muted)}
+.verdict b{font-family:var(--display);font-size:20px;letter-spacing:.02em;font-weight:600;display:block}
+.verdict p{margin:4px 0 0;color:var(--muted);font-size:13px}
+dl.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;margin:0}
+dl.kv dt{color:var(--muted);font-size:12.5px}
+dl.kv dd{margin:0;text-align:right;font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums}
+dl.kv dd small{color:var(--muted)}
+.sec{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}
+.sec h3{font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px}
+.bar{height:8px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--accent)}
+/* lower row */
+.lower{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:12px;margin-top:12px}
+.lower2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-top:12px}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th{font-weight:500;text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--line);padding:5px 8px;white-space:nowrap}
+td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+td.n{text-align:right;white-space:nowrap}
+tr.pick td{background:var(--panel2)}
+tr.clk{cursor:pointer} tr.clk:hover td{background:var(--panel2)}
+canvas.plot{width:100%;display:block;background:var(--panel2);border-radius:4px}
+.note{font-size:12px;color:var(--muted);margin:8px 0 0}
+details{margin-top:12px}
+summary{cursor:pointer;font-family:var(--display);font-size:17px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+textarea{width:100%;min-height:110px;font-family:var(--mono);font-size:12px;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:8px}
+.method{columns:2 340px;column-gap:28px;font-size:13px;color:var(--fg)}
+.method p{margin:0 0 8px;break-inside:avoid}
+.empty{color:var(--muted);padding:20px 0}
+@media (max-width:1180px){.grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.grid>.viewer{grid-column:1/-1;order:-1}}
+@media (max-width:760px){.grid,.lower,.lower2{grid-template-columns:minmax(0,1fr)}#viewWrap{height:420px}#list{max-height:340px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<header>
+  <div>
+    <h1>Asteroid Capture Planner</h1>
+  </div>
+  <p>Find near-Earth asteroids a single fully fuelled Starship could steer into an Earth orbit with apogee inside 100,000 miles (160,934 km). Pick an asteroid to see its mass, the burn plan, the flight time and the impact corridor if targeting goes wrong.</p>
+</header>
+
+<div class="grid">
+  <section class="card">
+    <div class="hd"><h2>Catalogue</h2><span class="pill mut" id="countPill"></span></div>
+    <div class="listctl">
+      <input id="listQ" type="search" placeholder="Search name or number" aria-label="Search asteroids">
+      <label for="listEx"><input id="listEx" type="checkbox" checked> Show excluded</label>
+      <label for="listSort">Order<select id="listSort"><option value="feas">Feasibility</option><option value="date">Next pass date</option><option value="dateSizeUp">Pass year, then size ↑</option><option value="dateSizeDown">Pass year, then size ↓</option><option value="sizeUp">Size, small to large</option><option value="sizeDown">Size, large to small</option></select></label>
+    </div>
+    <ul id="list"></ul>
+    <div class="bd note">Orbits from Lowell astorb.dat (epoch 2026-09-17). astorb has no rotation periods, so unknown spins are assumed to be 63 min, slightly slower than once per hour. Grey entries are excluded: faster than once per hour, or faster than once per day for asteroids 200 m or larger. Close-pass dates for grey entries are two-body estimates and can be off by a lunar distance or more. Select one to enter a measured rotation period.</div>
+  </section>
+
+  <section class="card viewer">
+    <div class="hd">
+      <h2>Inner solar system</h2>
+      <button class="b" id="resetBtn" type="button">Top view</button>
+    </div>
+    <div class="vctl vbar">
+      <button class="b" id="playBtn" type="button">Play</button>
+      <input id="tSlider" type="range" min="0" max="1000" value="0" aria-label="Time">
+      <label for="vSpeed">Speed<select id="vSpeed"><option value="2">2 d/s</option><option value="10">10 d/s</option><option value="30" selected>30 d/s</option><option value="90">90 d/s</option><option value="365">1 yr/s</option><option value="1460">4 yr/s</option></select></label>
+      <label for="vStart">From<input id="vStart" type="date"></label>
+      <label for="vEnd">To<input id="vEnd" type="date"></label>
+      <button class="b" id="vFit" type="button" title="Reset dates to first burn and encounter">Fit to mission</button>
+    </div>
+    <div id="viewWrap">
+      <canvas id="view"></canvas>
+      <div id="labels"></div>
+      <div id="dateTag"></div>
+      <div class="legend"><span><i style="background:var(--sel)"></i>selected asteroid</span><span><i style="background:var(--earth)"></i>Earth orbit</span><span><i style="background:var(--cool)"></i>eligible asteroid</span><span><i style="background:var(--muted)"></i>excluded</span><span><i style="background:var(--accent)"></i>Starship-driven path to Earth</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="hd"><h2 id="aTitle">Analysis</h2></div>
+    <div class="bd" id="analysis"><div class="empty">Click an asteroid in the view or the catalogue.</div></div>
+  </section>
+</div>
+
+<div class="lower">
+  <section class="card">
+    <div class="hd"><h2>Burn sequence</h2><span class="pill mut" id="burnPill"></span></div>
+    <div class="bd"><div class="tbl" id="burns"><div class="empty">No asteroid selected.</div></div></div>
+  </section>
+  <section class="card">
+    <div class="hd"><h2>Earth approach</h2><div class="vctl"><button class="b" id="apZin" type="button" aria-label="Zoom in">+</button><button class="b" id="apZout" type="button" aria-label="Zoom out">−</button><button class="b" id="apZreset" type="button">Reset view</button><button class="b" id="apZfar" type="button">2M mi view</button></div></div>
+    <div class="vctl vbar">
+      <button class="b" id="apPlay" type="button">Play</button>
+      <input id="apSlider" type="range" min="0" max="1000" value="0" aria-label="Approach time">
+      <label for="apSpeed">Speed<select id="apSpeed"><option value="600">10 min/s</option><option value="1800">30 min/s</option><option value="3600" selected>1 h/s</option><option value="10800">3 h/s</option><option value="43200">12 h/s</option><option value="86400">1 d/s</option></select></label>
+      <span class="mono" id="apClock" style="font-size:12px"></span>
+    </div>
+    <div class="bd"><canvas class="plot" id="approach" height="340" style="cursor:grab;touch-action:none"></canvas>
+      <p class="note" id="apNote">Geocentric view of the final approach: hyperbolic flyby if the capture burn does not fire, and the captured orbit if it does.</p></div>
+  </section>
+</div>
+
+<div class="lower2">
+  <section class="card">
+    <div class="hd"><h2>Impact corridor</h2><span class="pill mut" id="mapPill"></span></div>
+    <div class="bd"><canvas class="plot" id="map" height="280"></canvas>
+      <p class="note" id="mapNote"></p></div>
+  </section>
+  <section class="card">
+    <div class="hd"><h2>Encounter options</h2></div>
+    <div class="bd"><div class="tbl" id="encs"><div class="empty">No asteroid selected.</div></div>
+    <p class="note">Every natural close pass (under 0.8 AU) in the 25 years after the first burn. The planner picks the earliest pass one Starship can handle; when none is feasible it picks the pass needing the least Δv. Click a row to plan for that pass instead.</p></div>
+  </section>
+</div>
+
+<details>
+  <summary>Add asteroids</summary>
+  <p class="note">Paste JPL SBDB CSV (header with <span class="mono">full_name,a,e,i,om,w,ma,epoch,diameter,rot_per,H</span>; epoch as JD) or raw <span class="mono">astorb.dat</span> lines from asteroid.lowell.edu/astorb. astorb has no rotation periods, so add one at the end of a line as <span class="mono">| 36.5</span> (hours) or the asteroid is excluded.</p>
+  <textarea id="importBox" aria-label="Asteroid rows to import" placeholder="full_name,a,e,i,om,w,ma,epoch,diameter,rot_per,H"></textarea>
+  <div style="display:flex;gap:10px;align-items:center;margin-top:6px"><button class="b" id="importBtn" type="button">Add to catalogue</button><span class="note" id="importMsg" style="margin:0"></span></div>
+</details>
+
+<section class="card settings">
+  <div class="hd"><h2>Starship and model settings</h2></div>
+  <form class="assump" id="assump" onsubmit="return false">
+    <label for="pProp">Propellant (t)<input id="pProp" type="number" value="2300" min="1" step="50"></label>
+    <label for="pIsp">Isp vac (s)<input id="pIsp" type="number" value="380" min="100" step="1"></label>
+    <label for="pDry">Ship dry mass (t)<input id="pDry" type="number" value="100" min="1" step="5"></label>
+    <label for="pThr">Thrust (kN)<input id="pThr" type="number" value="15828" min="100" step="100"></label>
+    <label for="pGim">Gimbal angle (°)<input id="pGim" type="number" value="15" min="1" max="45" step="1"></label>
+    <label for="pLen">Ship length (m)<input id="pLen" type="number" value="52" min="1" step="1"></label>
+    <label for="pRho">Density g/cm³ (nom)<input id="pRho" type="number" value="1.87" min="0.5" step="0.01"></label>
+    <label for="pRhoLo">ρ low<input id="pRhoLo" type="number" value="1.19" min="0.3" step="0.01"></label>
+    <label for="pRhoHi">ρ high<input id="pRhoHi" type="number" value="2.67" min="0.5" step="0.01"></label>
+    <label for="pStart">First burn date<input id="pStart" type="date" value="2027-01-01"></label>
+    <span class="src">Starship Block 4 ship: 2,300 t propellant (planned) and 380 s vacuum Isp, the best figures in Wikipedia's Starship infobox; 15,828 kN listed maximum ship thrust. Block 4 dry mass is not listed, so 100 t (Block 1 figure) is assumed. Density: mean of the five spacecraft-measured near-Earth asteroids (Eros 2.67, Didymos 2.4, Itokawa 1.90, Ryugu 1.19, Bennu 1.19); bounds are the extremes. Despin assumes the engines gimbal 15° (typical Raptor range) and push from the ship's tail, about 52 m (Block 2 ship height; Block 4 is not listed) beyond the asteroid's surface. Changes recalculate every asteroid.</span>
+  </form>
+</section>
+
+<details open>
+  <summary>Method and limits</summary>
+  <div class="method">
+    <p><b>Mass.</b> m = ρ·πd³/6. Diameters come from radar or NEOWISE where published; otherwise from H with albedo 0.05–0.35. The low bound pairs the smallest diameter with ρ = 1.19 g/cm³, the high bound the largest diameter with 2.67 g/cm³.</p>
+    <p><b>Despin.</b> Asteroids under 200 m may spin as fast as once per hour; larger ones must turn slower than once per day. An unknown rotation period is assumed to be 1.05 h (63 min), slightly slower than once per hour, so unmeasured asteroids under 200 m are planned with that spin. Every candidate is despun first: the spin's angular momentum L = 0.4·M·R²·ω is cancelled by gimballed thrust, using propellant m = L/(v<sub>e</sub>·sin δ·(R + ship length)). That propellant is subtracted before the orbital burns. The sideways push during despin is ignored, and tumblers are treated as a single spin at their main period.</p>
+    <p><b>Propulsion.</b> Δv available = Isp·g₀·ln((M + m_dry + m_prop)/(M + m_dry)), with the asteroid, ship and propellant as one rigid body. Burns last minutes, so they are treated as impulses.</p>
+    <p><b>Orbits.</b> Osculating elements from Lowell's astorb.dat (epoch 2026-09-17), propagated as two-body Kepler orbits. The catalogue holds the slow rotators with measured periods plus the 115 near-Earth asteroids that astorb's orbits bring within 0.02 AU (7.8 lunar distances) of Earth between November 2026 and November 2036, among objects observed for at least 30 days. Planetary perturbations are ignored, so pass distances can be off by a lunar distance or more; Apophis's 2029 pass uses the published 38,017 km. This is a screening tool, not an ephemeris.</p>
+    <p><b>Burn 1, targeting.</b> Moves the natural flyby from impact parameter b₀ to the b that gives the chosen perigee, b = r_p·√(1 + 2μ/(r_p·v∞²)). Lever arm: along-track drift Δs ≈ 3·Δv·t, projected onto the B-plane.</p>
+    <p><b>Burn 3, capture.</b> At perigee, slows the asteroid from √(v∞² + 2μ/r_p) to the speed of an ellipse with apogee 160,934 km. Perigee is optimised between 500 km altitude and 160,934 km. Burn 2 is a 5% reserve for course correction.</p>
+    <p><b>Impact corridor.</b> An over- or under-performing Burn 1 slides the flyby along the line through the B-plane. Those trajectories are integrated through Earth's gravity to 100 km altitude and mapped on the rotating Earth. If only the capture burn fails, the asteroid passes at the targeted perigee and leaves; it cannot hit Earth.</p>
+    <p><b>Not modelled.</b> Lunar gravity assists (which can cut capture Δv a lot), solar and planetary perturbations, Yarkovsky drift, and the long-term stability of a 0.42-lunar-distance orbit under lunar perturbation.</p>
+  </div>
+</details>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@amcharts/amcharts4-geodata@4.1.28/dist/script/worldLow.js"></script>
+
+<script id="astorb">
+/* Extracted from Lowell astorb.dat (orbits epoch 2026-09-17), file dated 2026-11-01 */
+const ASTORB_EPOCH=2461300.5;
+const ASTORB_CURATED={"99942":[286.594662,126.68411,203.892611,3.341087,0.19118287,0.92233339,19.0],"163899":[324.413854,327.022604,273.625791,8.547941,0.20942366,0.82789057,17.56],"214869":[319.146368,293.897233,141.271865,1.99829,0.65289764,2.84862693,16.51],"4179":[149.830138,277.862188,125.362739,0.44808,0.6245887,2.54305897,15.29],"4486":[6.499487,169.304123,82.163,3.029599,0.65985535,2.20523359,15.62],"887":[157.498556,350.552901,110.406639,9.39974,0.57102882,2.47411802,13.82],"3102":[100.402853,154.816546,172.026318,8.443264,0.44909636,2.15196608,16.16],"101955":[154.960991,66.400812,1.966596,6.033007,0.2036779,1.12591531,20.68],"679648":[1.847186,250.545832,49.449184,4.446455,0.32647512,1.00606103,23.85]};
+/* [num,name,H,diam_km,M,w,om,i,e,a,arc_days,nextCA,nextCA_AU] */
+const ASTORB_CLOSE=[["","2008 DB",25.72,0.0,124.863183,274.644453,141.425094,4.224113,0.23292076,1.0534503,4769,"2032-08-14",0.00081],["","2016 NL39",27.57,0.0,212.604095,341.976397,281.661249,0.790278,0.24715709,1.3423818,35,"2030-06-29",0.00113],["","2024 CU",26.37,0.0,8.622726,198.163057,320.530715,2.013772,0.47427944,1.84175973,99,"2034-02-07",0.00161],["","2001 AV43",24.7,0.0,285.894888,51.267736,20.535372,0.200706,0.2408104,1.28370111,4807,"2029-11-12",0.00231],["","2019 RT3",25.22,0.0,326.663694,340.375833,348.015594,4.603975,0.45182553,1.80673107,68,"2036-09-10",0.00236],["","2022 MK1",23.98,0.0,263.118163,6.458122,297.480212,3.191524,0.43623592,1.79386984,126,"2034-07-19",0.00251],["","2023 EB",26.18,0.0,235.261326,263.885477,187.822524,0.192293,0.30481932,1.24728053,45,"2036-10-21",0.00253],["","2025 DT2",26.61,0.0,30.067861,227.380281,336.997143,14.703749,0.23297578,1.21143921,207,"2029-02-25",0.00266],["137108","1999 AN10",18.05,0.0,208.687565,268.336824,314.320949,39.932316,0.56207628,1.45851688,24459,"2027-08-07",0.00278],["","2025 EL12",22.94,0.0,90.397427,87.070436,172.850659,18.207599,0.20180288,1.03791775,310,"2027-09-16",0.00309],["","2021 EO2",27.87,0.0,33.457016,356.264042,209.63706,0.14042,0.33096974,1.45615517,126,"2028-05-19",0.00332],["","2020 XF",26.84,0.0,2.770377,211.816972,71.210336,4.378783,0.09581976,0.91490924,31,"2027-12-02",0.00395],["","2019 DP",24.96,0.0,349.248116,91.102854,336.397244,10.365509,0.24861098,1.0727199,625,"2027-08-30",0.00416],["","2016 CL18",23.83,0.0,270.064138,116.581665,277.463264,0.408947,0.43723286,1.37190416,46,"2036-08-08",0.00457],["","2025 QV9",25.11,0.0,227.124455,26.088576,350.165859,3.377617,0.24317116,1.31100588,106,"2028-09-14",0.00474],["","2008 YF",20.86,0.0,210.532583,321.166113,86.934971,21.984975,0.43814827,1.62809555,37,"2035-12-19",0.00489],["","2001 BB16",23.0,0.0,316.694811,196.079945,122.318391,2.029331,0.17235491,0.85538314,6968,"2035-01-15",0.00503],["","2016 VY1",24.79,0.0,100.842456,202.749853,230.478287,10.625785,0.12832849,1.11776568,2420,"2029-11-12",0.00657],["","2011 AX22",24.73,0.0,262.643012,291.028359,58.004156,0.684977,0.33685776,0.96660042,406,"2034-05-13",0.00699],["","2011 AH5",25.95,0.0,305.279717,267.381548,294.552348,6.844408,0.29014012,1.07799751,583,"2031-07-20",0.00716],["153814","2001 WN5",18.28,0.0,58.618412,44.677318,277.333579,1.920378,0.46730466,1.71184925,10614,"2028-06-25",0.00725],["","2026 PR1",26.59,0.0,54.486758,123.174783,157.582172,0.654412,0.17787891,1.21209177,57,"2030-08-04",0.0074],["","2014 CE13",24.11,0.0,284.883959,312.759242,334.749334,5.473895,0.57161904,0.85126996,4028,"2036-02-19",0.00757],["","2019 CL2",23.35,0.0,244.683681,138.161523,86.782303,1.444017,0.32798037,1.35646245,243,"2030-07-02",0.00779],["536531","2015 DV215",20.46,0.0,74.581689,41.39906,13.909129,13.198229,0.40260708,1.53841366,1644,"2035-10-06",0.00787],["","2014 YN",25.72,0.0,171.978779,16.019899,239.187665,1.208538,0.13412325,0.89196459,51,"2030-11-11",0.0079],["","2026 NW1",25.57,0.0,40.174487,7.568706,273.84762,1.909365,0.30833389,1.47916517,38,"2035-07-04",0.00794],["","2018 VB7",25.09,0.0,20.370468,26.8726,221.200055,8.501418,0.28206807,0.81610033,32,"2032-10-31",0.00812],["","2020 UE",25.53,0.0,324.614533,273.723516,23.095261,3.368235,0.47881159,1.34242073,34,"2034-10-15",0.00817],["","2019 WV",24.98,0.0,43.919412,131.533427,213.178081,1.497993,0.18137732,1.0931974,37,"2035-11-14",0.00842],["292220","2006 SU49",19.39,0.0,205.107739,199.111567,303.057525,2.518095,0.31179106,1.41188058,8286,"2029-01-28",0.00859],["","2024 JR16",21.77,0.0,26.79106,108.062248,268.30277,5.932434,0.35123989,1.00171528,3601,"2033-06-15",0.00886],["35396","1997 XF11",17.01,0.0,310.416718,103.114946,213.602637,4.099636,0.4840506,1.44207398,13143,"2028-10-26",0.00918],["","2019 BE5",25.13,0.0,152.995061,9.86807,308.9222,1.433122,0.65921094,0.61003106,363,"2029-01-27",0.00924],["893859","2016 VO1",23.14,0.0,141.508114,131.951777,129.705197,1.616352,0.4287218,0.98285408,3396,"2027-02-14",0.00948],["","2015 DG200",22.24,0.0,338.917686,289.387953,119.37854,10.61298,0.7259633,2.52534162,2947,"2027-01-22",0.00955],["418416","2008 LV16",20.29,0.0,353.862398,121.948928,236.470401,4.714297,0.62524155,2.08979864,5688,"2029-11-22",0.00974],["","2012 XE133",23.31,0.0,325.813937,337.114741,281.006419,6.727671,0.43259114,0.72312438,2946,"2028-12-30",0.01009],["","2021 FH1",25.32,0.0,359.751432,79.182944,179.522252,18.165261,0.33635048,1.21138068,2937,"2029-03-21",0.01016],["","2019 WG2",24.93,0.0,289.320637,124.490182,240.512452,23.351062,0.3045516,1.27770156,1124,"2032-11-22",0.01019],["","2011 LJ19",21.36,0.0,197.529082,30.477947,296.331291,1.536834,0.62454945,2.61656036,167,"2028-07-29",0.01034],["","2019 YX1",24.43,0.0,281.274832,201.438248,276.22345,7.07643,0.46666886,1.79244682,31,"2031-12-24",0.01037],["","2021 VW10",23.39,0.0,6.116436,286.990647,227.42447,25.162605,0.39908877,1.32373438,39,"2028-05-08",0.01049],["","2023 NH1",22.3,0.0,43.666282,279.392903,304.050589,0.743069,0.59968517,2.06587383,38,"2032-03-08",0.01072],["","2022 QX4",24.72,0.0,266.038592,173.837867,337.744375,0.128316,0.50466757,0.68076928,3321,"2031-09-07",0.01097],["","2020 VV",27.28,0.0,26.215255,332.671429,19.666375,0.345066,0.11864361,1.11767188,61,"2033-10-18",0.011],["","2013 JL22",21.11,0.0,163.026361,69.109812,37.938319,3.062883,0.59433593,1.1869711,8046,"2035-05-01",0.01107],["","2001 CP36",23.72,0.0,312.110686,353.63156,330.927583,10.555365,0.40719188,0.71457302,2213,"2030-02-21",0.01114],["","2025 QK9",24.06,0.0,102.888014,358.30865,16.032594,1.263162,0.56363505,2.23442523,56,"2035-10-22",0.01121],["","2021 PC9",21.18,0.0,42.195367,267.877393,315.36371,11.302879,0.66715571,1.84707699,3721,"2036-08-04",0.01191],["","2010 VQ",27.72,0.0,120.195708,199.227515,27.478705,0.345811,0.19751001,0.86100982,4411,"2026-12-12",0.01196],["","2019 GG19",24.13,0.0,316.12591,336.208999,186.155369,7.230988,0.62039816,2.51796497,2906,"2035-04-01",0.01212],["","2005 VL1",26.3,0.0,41.126174,226.466139,39.256734,0.235234,0.22505176,0.89176528,5875,"2033-02-05",0.01237],["","2013 CY",28.19,0.0,242.293779,149.617738,302.509607,0.780253,0.13398732,1.11389332,41,"2032-11-18",0.01248],["","2020 TJ3",24.56,0.0,83.668081,265.74434,222.653285,8.714452,0.24351667,1.05592886,591,"2035-05-03",0.0128],["","2023 GQ2",19.82,0.0,354.042812,349.371803,53.820922,36.838688,0.40162737,1.64431076,4858,"2028-11-16",0.01287],["","2012 TO139",19.84,0.0,257.048936,56.57991,178.969554,5.343793,0.88777746,2.44147704,6967,"2031-09-22",0.01301],["","2018 BY6",23.44,0.0,272.712128,75.936815,288.187817,6.556129,0.28026498,1.21008189,5879,"2029-07-15",0.01305],["613471","2006 RJ1",22.27,0.0,339.107869,110.3262,93.449155,1.41458,0.30033775,0.95042278,5213,"2033-12-21",0.0133],["","2011 ES4",25.85,0.0,151.960009,274.809806,339.792672,3.370074,0.2432381,1.09616925,3489,"2027-03-13",0.01345],["","2016 EP84",27.4,0.0,69.470858,195.542488,287.394738,0.818884,0.1733288,1.19047155,79,"2029-01-03",0.01346],["216985","2000 QK130",21.34,0.0,175.993652,66.414641,173.793316,4.719503,0.26186245,1.18055567,8148,"2036-03-13",0.01349],["","2021 TG4",20.0,0.0,231.837432,216.617626,46.864156,7.760003,0.58279352,2.20409418,3927,"2034-05-03",0.014],["66391","Moshup",16.64,0.0,196.887975,192.654875,244.894815,38.879008,0.68836337,0.64239009,9911,"2036-05-25",0.01444],["","2000 SL10",21.81,0.0,98.048591,78.672212,208.673811,1.464453,0.33871559,1.371764,69,"2029-05-13",0.01445],["","2021 XL6",21.18,0.0,248.030345,343.828207,59.884119,23.191292,0.33913179,1.47666437,101,"2030-11-23",0.01509],["","2026 PG",24.3,0.0,247.221188,204.992967,277.86385,4.240675,0.23136869,0.87660065,32,"2035-06-19",0.01524],["","2021 RO16",26.59,0.0,0.387326,219.36146,60.106408,0.414125,0.26411474,1.18600821,30,"2034-04-23",0.01538],["","2007 YF",24.81,0.0,172.54347,34.996986,276.579102,1.650396,0.11980212,0.95367489,5224,"2034-11-29",0.01542],["","2014 KM39",24.18,0.0,197.227199,228.081865,233.861668,13.315992,0.37619292,0.90690268,39,"2033-05-11",0.01547],["440212","2004 OB",18.97,0.0,11.860245,223.364749,174.510421,3.442118,0.43010642,1.68097807,8039,"2028-10-01",0.01559],["","2018 XO4",25.44,0.0,113.545881,173.458118,297.870543,3.140539,0.24444265,1.27811021,109,"2032-01-23",0.01562],["","2009 HC",24.66,0.0,237.511796,271.813704,203.365709,3.731771,0.12527473,1.03489755,6041,"2027-04-10",0.01579],["","2002 HP11",20.29,0.0,95.070979,90.642308,8.990343,5.133605,0.76452881,2.06873225,8556,"2034-09-22",0.01581],["437844","1999 MN",21.01,0.0,281.798073,9.209051,81.384716,2.031798,0.66527178,0.67410053,9519,"2036-06-02",0.01587],["","2000 SG344",24.79,0.0,221.632798,275.619126,191.709519,0.113151,0.0668656,0.97752871,507,"2028-05-08",0.0159],["462550","2009 CB3",19.63,0.0,55.946413,229.52899,158.717821,21.503117,0.72358203,1.06492517,4455,"2032-03-01",0.01608],["","2018 GG2",19.25,0.0,207.024795,278.518922,195.036824,43.311962,0.71038381,2.23692755,2510,"2028-04-03",0.01608],["797455","2011 HJ7",22.32,0.0,305.802446,297.329969,34.316673,1.116286,0.51635897,1.2508446,5131,"2032-05-11",0.01613],["","2020 QU5",25.61,0.0,79.554937,100.920216,68.833215,0.775086,0.58008389,0.7229798,1872,"2033-10-09",0.01629],["","2018 RY1",24.57,0.0,87.774658,325.061426,199.553735,1.169698,0.33877008,0.82281289,2247,"2027-10-16",0.01668],["443104","2013 XK22",24.16,0.0,268.566865,265.768754,268.330052,6.993459,0.20326843,1.04562551,959,"2031-06-20",0.01671],["","2017 RO2",22.19,0.0,337.122045,229.016999,355.010018,18.773748,0.15597881,1.11679122,2219,"2030-03-16",0.01679],["","2007 TQ24",22.06,0.0,58.717529,30.007199,183.465289,10.590244,0.53941077,0.79330328,6252,"2031-09-22",0.01687],["","2019 GM1",27.22,0.0,58.374497,105.514751,186.942934,6.756724,0.07096557,1.00447359,1090,"2028-10-04",0.01698],["","2022 MA3",22.27,0.0,134.544994,23.437484,294.628325,10.304075,0.51637545,2.08182262,3325,"2034-07-21",0.01714],["","2019 CC5",21.98,0.0,33.414566,295.567764,131.208272,7.488817,0.60511972,1.84290012,3669,"2034-02-07",0.0172],["","2003 UY12",23.12,0.0,131.924195,200.679265,22.853914,16.402944,0.59452028,0.70107879,7323,"2030-10-14",0.01753],["","2023 TB2",23.85,0.0,283.974892,194.484988,338.991398,8.636325,0.29864847,0.789154,57,"2030-09-05",0.01759],["172678","2003 YM137",18.88,0.0,134.630776,131.029068,73.962773,2.824463,0.70299083,2.55789312,7921,"2033-06-24",0.01764],["","2024 XP16",28.24,0.0,3.152536,83.850957,257.704961,2.852993,0.13968847,0.99330853,374,"2034-05-19",0.01789],["","2019 KF2",25.22,0.0,246.638997,90.352562,72.817129,2.532878,0.13020776,1.08129236,32,"2028-05-12",0.01791],["","2015 FN35",23.69,0.0,175.974351,256.921259,167.433092,6.258781,0.37697682,1.07786219,2696,"2034-03-05",0.01801],["","2021 PC7",19.38,0.0,146.605975,145.38363,352.962426,35.373469,0.31331149,0.82999376,3307,"2033-09-16",0.0181],["","2021 TA8",21.33,0.0,356.657992,114.899559,42.228619,21.269484,0.34342826,1.30746261,5469,"2034-05-04",0.01823],["","2022 AT2",26.95,0.0,230.004298,22.693615,113.613758,6.154873,0.33650765,1.4526293,62,"2029-01-19",0.01856],["","2006 BZ147",25.44,0.0,238.350065,94.851745,139.825081,1.410736,0.09868625,1.02350733,587,"2035-02-25",0.01858],["839444","2014 QX432",19.86,0.0,302.769296,68.767117,111.708772,6.439828,0.58689353,1.36682669,4037,"2033-07-04",0.01868],["","2023 SZ3",24.02,0.0,23.968815,138.416305,174.730077,16.196599,0.25823448,1.31003796,1187,"2029-09-15",0.01893],["","2017 HP49",22.89,0.0,66.63712,214.152738,76.177968,6.12359,0.43663392,1.69202496,185,"2028-06-01",0.01899],["415713","1998 XX2",20.0,0.0,54.93651,153.088922,74.342001,6.972469,0.36761531,0.74102644,9491,"2028-11-28",0.01911],["","2019 YA1",25.52,0.0,27.317085,184.565751,254.480382,2.125737,0.40966397,1.69042198,39,"2030-11-30",0.01912],["","2023 LC",28.64,0.0,196.769232,128.590665,85.472979,0.628049,0.194387,1.20879142,31,"2031-03-19",0.0192],["","2004 TD10",22.05,0.0,104.13739,137.206114,47.876941,2.600081,0.44284538,0.75107935,5466,"2032-10-27",0.01922],["","2016 TH10",24.82,0.0,183.912962,164.28558,7.674783,1.390554,0.5160208,0.76584235,2915,"2036-08-14",0.01942],["","2020 OP3",20.91,0.0,288.278971,147.770373,309.013792,29.536629,0.27029692,1.28952635,1362,"2027-01-28",0.01942],["","2025 QA4",22.03,0.0,175.475312,44.587715,17.679163,5.144111,0.38697005,1.4543811,215,"2032-10-06",0.01957],["528807","2009 BL71",22.07,0.0,343.744599,292.459054,17.448114,5.545723,0.26577705,0.93670878,3716,"2029-04-01",0.0196],["","2019 GA",23.59,0.0,133.19863,1.690745,51.960286,1.55483,0.53754193,0.87271027,1870,"2029-06-28",0.01967],["","2022 BA6",26.39,0.0,319.251634,183.073263,133.029602,1.649339,0.122143,0.90235888,30,"2028-02-25",0.01968],["","2011 YT62",22.23,0.0,133.38981,344.429263,34.784398,6.1445,0.19378077,1.19874154,4521,"2032-10-30",0.01975],["","2017 XS",22.82,0.0,280.123372,27.910353,257.361522,14.860653,0.34181029,0.79301592,60,"2029-12-06",0.01975],["","2016 YH",25.7,0.0,296.04288,0.343697,265.965177,2.226075,0.47418455,0.68139621,3289,"2034-12-16",0.01982],["","2000 UK11",24.98,0.0,311.229206,294.102435,236.909393,0.78565,0.24849678,0.8832874,5435,"2029-08-02",0.01987],["","2001 BA16",26.17,0.0,157.681252,243.146401,115.261021,5.77641,0.13745155,0.94005287,40,"2032-01-17",0.01996]];
+</script>
+
+<script id="engine">
+/* ===================== ORBITAL ENGINE ===================== */
+const AU=1.495978707e8, GMS=1.32712440018e11, MUE=398600.4418, RE=6378.137, DAY=86400, D2R=Math.PI/180, R2D=180/Math.PI;
+const J2000=2451545.0, G0=9.80665, RA_MAX=160934.4, OBL=23.43928*D2R, RP_MIN=RE+500;
+const jdFromDate=d=>d.getTime()/864e5+2440587.5;
+const dateFromJd=jd=>new Date((jd-2440587.5)*864e5);
+const jdFromISO=s=>jdFromDate(new Date(s));
+const fmtDate=jd=>dateFromJd(jd).toISOString().slice(0,10);
+const v3={sub:(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],add:(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],mul:(a,s)=>[a[0]*s,a[1]*s,a[2]*s],
+  dot:(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],len:a=>Math.hypot(a[0],a[1],a[2]),
+  cross:(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],norm:a=>{const l=Math.hypot(a[0],a[1],a[2]);return[a[0]/l,a[1]/l,a[2]/l]}};
+
+function solveKepler(M,e){let E=e<0.8?M:Math.PI;for(let k=0;k<60;k++){const d=(E-e*Math.sin(E)-M)/(1-e*Math.cos(E));E-=d;if(Math.abs(d)<1e-13)break}return E}
+/* el: {a AU,e,i,om,w deg,M0 deg,epoch JD} -> heliocentric ecliptic J2000 state, km & km/s */
+function state(el,jd){
+  const a=el.a*AU,n=Math.sqrt(GMS/(a*a*a));
+  let M=el.M0*D2R+n*(jd-el.epoch)*DAY;M=((M%(2*Math.PI))+2*Math.PI)%(2*Math.PI);
+  const e=el.e,E=solveKepler(M,e),cE=Math.cos(E),sE=Math.sin(E),b=Math.sqrt(1-e*e);
+  const xp=a*(cE-e),yp=a*b*sE,r=a*(1-e*cE),vf=Math.sqrt(GMS*a)/r,vxp=-vf*sE,vyp=vf*b*cE;
+  const O=el.om*D2R,w=el.w*D2R,i=el.i*D2R,cO=Math.cos(O),sO=Math.sin(O),cw=Math.cos(w),sw=Math.sin(w),ci=Math.cos(i),si=Math.sin(i);
+  const P=[cO*cw-sO*sw*ci,sO*cw+cO*sw*ci,sw*si],Q=[-cO*sw-sO*cw*ci,-sO*sw+cO*cw*ci,cw*si];
+  return{r:[P[0]*xp+Q[0]*yp,P[1]*xp+Q[1]*yp,P[2]*xp+Q[2]*yp],v:[P[0]*vxp+Q[0]*vyp,P[1]*vxp+Q[1]*vyp,P[2]*vxp+Q[2]*vyp]};
+}
+const periodS=el=>2*Math.PI*Math.sqrt(Math.pow(el.a*AU,3)/GMS);
+/* JPL approximate planetary elements (1800–2050), [a,e,I,L,varpi,Omega] + rates per century */
+const PLANETS={
+  Mercury:{c:[0.38709927,0.20563593,7.00497902,252.25032350,77.45779628,48.33076593],r:[0.00000037,0.00001906,-0.00594749,149472.67411175,0.16047689,-0.12534081],rad:2439},
+  Venus:{c:[0.72333566,0.00677672,3.39467605,181.97909950,131.60246718,76.67984255],r:[0.00000390,-0.00004107,-0.00078890,58517.81538729,0.00268329,-0.27769418],rad:6052},
+  Earth:{c:[1.00000261,0.01671123,-0.00001531,100.46457166,102.93768193,0.0],r:[0.00000562,-0.00004392,-0.01294668,35999.37244981,0.32327364,0.0],rad:6371},
+  Mars:{c:[1.52371034,0.09339410,1.84969142,-4.55343205,-23.94362959,49.55953891],r:[0.00001847,0.00007882,-0.00813131,19140.30268499,0.44441088,-0.29257343],rad:3390}};
+function planetEl(name,jd){const p=PLANETS[name],T=(jd-J2000)/36525,x=p.c.map((c,k)=>c+p.r[k]*T);
+  return{a:x[0],e:x[1],i:x[2],om:x[5],w:x[4]-x[5],M0:x[3]-x[4],epoch:jd}}
+const earthState=jd=>state(planetEl('Earth',jd),jd);
+
+/* ---------- catalogue (published elements; see sources) ---------- */
+const CATALOG=[
+ {id:'99942',name:'99942 Apophis',el:{a:0.9224,e:0.1911,i:3.341,om:203.9,w:126.7,M0:90.28,epoch:2460800.5},
+  d:0.34,dLo:0.31,dHi:0.37,dSrc:'radar',rot:30.56,rotNote:'tumbler, ~30.5 h',H:19.09,
+  anchor:'2029-04-13T21:46Z',known:[{iso:'2029-04-13T21:46Z',km:38017,perigee:true}]},
+ {id:'163899',name:'(163899) 2003 SD220',el:{a:0.8276,e:0.2106,i:8.4591,om:274.05,w:326.47,M0:322.67,epoch:2458000.5},
+  d:0.80,dLo:0.72,dHi:0.88,dSrc:'radar',rot:285,rotNote:'tumbler, ~11.9 d',H:17.3,
+  anchor:'2021-12-17T00:00Z',known:[{iso:'2021-12-17T00:00Z',km:5427633},{iso:'2027-11-12T00:00Z',km:0.1382*AU}]},
+ {id:'214869',name:'(214869) 2007 PA8',el:{a:2.8251,e:0.6612,i:1.9841,om:142.63,w:292.33,M0:1.4149,epoch:2458000.5},
+  d:1.35,dLo:1.21,dHi:1.6,dSrc:'radar',rot:100,rotNote:'85–102 h',H:16.2,
+  anchor:'2012-11-05T00:00Z',known:[{iso:'2012-11-05T00:00Z',km:6.5e6}]},
+ {id:'4179',name:'4179 Toutatis',el:{a:2.5321,e:0.6288,i:0.446,om:124.30,w:278.75,M0:5.122,epoch:2454797.5},
+  d:2.45,dLo:2.2,dHi:2.7,dSrc:'radar',rot:176,rotNote:'tumbler, 5.4 d / 7.4 d',H:15.3,
+  anchor:'2012-12-12T00:00Z',known:[{iso:'2012-12-12T00:00Z',km:0.046*AU}]},
+ {id:'4486',name:'4486 Mithra',el:{a:2.2000,e:0.6629,i:3.0395,om:82.240,w:168.87,M0:91.928,epoch:2458000.5},
+  d:1.849,dLo:1.6,dHi:2.25,dSrc:'NEOWISE',rot:67.5,rotNote:'radar, ±6 h',H:15.6,
+  anchor:'2023-04-11T16:49Z',known:[{iso:'2023-04-11T16:49Z',km:0.16267*AU}]},
+ {id:'887',name:'887 Alinda',el:{a:2.4788,e:0.56711,i:9.3563,om:110.55,w:350.34,M0:300.87,epoch:2457600.5},
+  d:4.2,dLo:3.8,dHi:4.6,dSrc:'thermal',rot:73.97,rotNote:'73.97 h',H:13.4,
+  anchor:'2025-01-10T00:00Z',known:[]},
+ {id:'3102',name:'3102 Krok',el:{a:2.1506,e:0.4495,i:8.4439,om:172.09,w:154.78,M0:86.843,epoch:2457800.5},
+  d:1.5,dLo:1.3,dHi:1.8,dSrc:'from H',rot:150,rotNote:'148–152 h',H:16.5,anchor:null,known:[]},
+ {id:'101955',name:'101955 Bennu',el:{a:1.1264,e:0.2037,i:6.035,om:2.06,w:66.22,M0:101.70,epoch:2455562.5},
+  d:0.49,dLo:0.48,dHi:0.50,dSrc:'spacecraft',rot:4.296,rotNote:'4.30 h',H:20.2,anchor:null,known:[]},
+ {id:'679648',name:'(679648) 2019 XS',el:{a:1.005,e:0.3264,i:4.447,om:49.483,w:250.285,M0:140.339,epoch:2459600.5},
+  d:0.07,dLo:0.06,dHi:0.08,dSrc:'radar',rot:3.0,rotNote:'~3 h',H:23.96,
+  anchor:'2021-11-09T03:48Z',known:[{iso:'2021-11-09T03:48Z',km:574000}]},
+];
+
+/* re-phase mean anomaly so the asteroid is nearest Earth at the anchor epoch */
+function anchorEl(el,jdA){
+  const f=m=>v3.len(v3.sub(state({...el,M0:m,epoch:jdA},jdA).r,earthState(jdA).r));
+  let best=0,bd=1e99;for(let m=0;m<360;m+=0.2){const d=f(m);if(d<bd){bd=d;best=m}}
+  let lo=best-0.2,hi=best+0.2;for(let k=0;k<60;k++){const m1=lo+(hi-lo)*0.382,m2=lo+(hi-lo)*0.618;if(f(m1)<f(m2))hi=m2;else lo=m1}
+  return{...el,M0:(lo+hi)/2,epoch:jdA};
+}
+function diamFromH(H,p){return 1329/Math.sqrt(p)*Math.pow(10,-H/5)}
+
+function prepare(a){
+  if(a.anchor){a.elA=anchorEl(a.el,jdFromISO(a.anchor))}else a.elA={...a.el};
+  if(!a.d&&a.H){a.d=diamFromH(a.H,0.14);a.dLo=diamFromH(a.H,0.35);a.dHi=diamFromH(a.H,0.05);a.dSrc='from H'}
+  /* eligible: slower than once per day at any size, or slower than once per hour if smaller than 200 m (despun by gimballing) */
+  const ROT_ASSUMED=1.05; // unknown rotation: assume slightly slower than once per hour (63 min)
+  a.rotAssumed=a.rot==null;a.rotEff=a.rot==null?ROT_ASSUMED:a.rot;const rr=a.rotEff;
+  const spinTxt=rr<1?(rr*60).toFixed(0)+' min':rr.toFixed(rr<10?2:1)+' h';
+  a.eligible=rr>24||(rr>1&&a.d<0.2);
+  a.reason=a.eligible?'':a.rotAssumed?'spin unknown, ≥200 m':(rr<=1?'spins in '+spinTxt:'spins in '+spinTxt+', ≥200 m');
+  a.reasonLong=a.rotAssumed?`Rotation period unknown, so it is assumed to be ${spinTxt}, slightly slower than once per hour. At ${(a.d*1000).toFixed(0)} m it is too large: spins faster than once per day are only accepted under 200 m.`:rr<=1?`It spins once every ${spinTxt}. Asteroids spinning faster than once per hour are not considered at any size.`:`It spins once every ${spinTxt} and is ${(a.d*1000).toFixed(0)} m across. Spins faster than once per day are only accepted for asteroids under 200 m.`;
+  return a;
+}
+
+function mass(a,P){const v=d=>Math.PI*Math.pow(d*1000,3)/6;
+  return{nom:P.rho*1000*v(a.d),lo:P.rhoLo*1000*v(a.dLo),hi:P.rhoHi*1000*v(a.dHi)}}
+
+/* natural close passes under 0.8 AU */
+let EARTH_CACHE={jd0:null,step:0,arr:[]};
+function earthGrid(jd0,step,N){if(EARTH_CACHE.jd0!==jd0||EARTH_CACHE.step!==step||EARTH_CACHE.arr.length<N+1){const arr=[];for(let k=0;k<=N;k++)arr.push(earthState(jd0+k*step).r);EARTH_CACHE={jd0,step,arr}}return EARTH_CACHE.arr}
+function encounters(a,jd0,years){
+  const out=[],f=jd=>v3.len(v3.sub(state(a.elA,jd).r,earthState(jd).r));
+  const step=1,N=Math.ceil(years*365.25/step),EG=earthGrid(jd0,step,N),g=k=>v3.len(v3.sub(state(a.elA,jd0+k*step).r,EG[k]));
+  let d0=g(0),d1=g(1);
+  for(let k=2;k<=N;k++){const jd=jd0+k*step,d2=g(k);
+    if(d1<d0&&d1<=d2&&d1<0.8*AU){let lo=jd-2*step,hi=jd;
+      for(let j=0;j<50;j++){const m1=lo+(hi-lo)*0.382,m2=lo+(hi-lo)*0.618;if(f(m1)<f(m2))hi=m2;else lo=m1}
+      const t=(lo+hi)/2,sa=state(a.elA,t),se=earthState(t),rr=v3.sub(sa.r,se.r),vr=v3.sub(sa.v,se.v);
+      const e={jd:t,dist:v3.len(rr),rrel:rr,vrel:vr,vinf:v3.len(vr),vhel:sa.v,published:false};
+      for(const k2 of a.known||[]){const jk=jdFromISO(k2.iso);if(Math.abs(jk-t)<6){e.published=true;e.jd=jk;e.dist=k2.km;e.distIsPerigee=!!k2.perigee}}
+      out.push(e)}
+    d0=d1;d1=d2}
+  for(const e of out){ // impact parameter b0
+    e.b0=e.distIsPerigee?e.dist*Math.sqrt(1+2*MUE/(e.dist*e.vinf*e.vinf)):e.dist;}
+  return out;
+}
+
+const bOf=(rp,vinf)=>rp*Math.sqrt(1+2*MUE/(rp*vinf*vinf));
+const dvCap=(rp,vinf)=>Math.sqrt(vinf*vinf+2*MUE/rp)-Math.sqrt(2*MUE/rp*RA_MAX/(RA_MAX+rp));
+/* hyperbolic time from radius r to perigee */
+function tHyp(r,rp,vinf){const a=-MUE/(vinf*vinf),e=1+rp*vinf*vinf/MUE;if(r<=rp)return 0;
+  const F=Math.acosh((1-r/a)/e);return (e*Math.sinh(F)-F)/Math.sqrt(MUE/Math.pow(-a,3))}
+
+/* propellant to stop the spin with gimballed thrust: L = I·ω (uniform sphere), torque arm = radius + ship length,
+   tangential thrust share = sin(gimbal). Angular impulse L = ṁ·ve·sin(δ)·arm·t  =>  m_prop = L / (ve·sin δ·arm) */
+function despin(Mkg,dKm,rotH,P){if(!rotH||!isFinite(rotH))return{prop:0,L:0,arm:0};const R=dKm*500,I=0.4*Mkg*R*R,w=2*Math.PI/(rotH*3600),L=I*w,arm=R+P.shipLen;
+  return{prop:L/(P.isp*G0*Math.sin(P.gimbal*D2R)*arm),L,arm,I,w}}
+/* plan a mission for one encounter */
+function plan(a,enc,jd1,P,M){
+  const T=(enc.jd-jd1)*DAY,Pa=periodS(a.elA);
+  if(T<30*DAY)return null;
+  const S=v3.norm(enc.vrel),vh=v3.norm(enc.vhel),proj=v3.sub(vh,v3.mul(S,v3.dot(vh,S))),sinT=Math.max(v3.len(proj),1e-3);
+  const lever=T>Pa/2?Math.max(3*T*sinT,Pa/Math.PI):T; // km of B-plane shift per km/s
+  let best=null;
+  for(let k=0;k<=500;k++){const rp=RP_MIN*Math.pow(RA_MAX/RP_MIN,k/500),bt=bOf(rp,enc.vinf);
+    const db=Math.abs(enc.b0-bt),dv1=db/lever,dv3=dvCap(rp,enc.vinf),dv2=T>60*DAY?0.05*dv1:0,tot=dv1+dv2+dv3;
+    if(!best||tot<best.tot)best={rp,bt,db,dv1,dv2,dv3,tot}}
+  const ve=P.isp*G0/1000,md=P.dry*1000,mp=P.prop*1000;
+  const ds=despin(M.nom,a.d,a.rotEff,P),dsLo=despin(M.lo,a.dLo,a.rotEff,P);
+  const dvA=(Mx,pd)=>pd>=mp?0:ve*Math.log((Mx+md+mp-pd)/(Mx+md));
+  const dvAvail=dvA(M.nom,ds.prop),dvAvailLo=dvA(M.lo,dsLo.prop);
+  // sequential propellant use: despin first, then the orbital burns
+  let m=M.nom+md+mp;const burns=[];
+  if(ds.prop>0){burns.push({nm:'Despin',jd:jd1,dv:null,despin:true,txt:`Gimbal engines ${P.gimbal}° to apply torque until the ${a.rotEff.toFixed(2)} h${a.rotAssumed?' (assumed)':''} spin stops (angular momentum ${ds.L.toExponential(2)} kg·m²/s, lever arm ${ds.arm.toFixed(0)} m)`,prop:ds.prop,dur:ds.prop*P.isp*G0/(P.thr*1000)});m-=ds.prop}
+  const spec=[['Targeting',jd1,best.dv1,'Heliocentric burn, mostly along-track, to slide the flyby onto perigee '+fmtKm(best.rp-RE)+' altitude'],
+    ['Course correction',enc.jd-30,best.dv2,'Reserve (5% of Burn 1) to trim B-plane errors after tracking'],
+    ['Capture',enc.jd,best.dv3,'Retrograde at perigee; leaves an ellipse with apogee 160,934 km (100,000 mi)']];
+  for(const [nm,jd,dv,txt] of spec){if(dv<=0&&nm==='Course correction')continue;const m2=m*Math.exp(-dv/ve),used=m-m2;
+    burns.push({nm,jd,dv,txt,prop:used,dur:used*ve*1000/(P.thr*1000)});m=m2}
+  const propNeed=burns.reduce((s,b)=>s+b.prop,0);
+  const feasible=ds.prop<mp&&dvAvail>=best.tot,feasibleLo=dsLo.prop<mp&&dvAvailLo>=best.tot;
+  const factor=Math.exp(best.tot/ve)-1,ships=((M.nom+md)*factor+ds.prop)/mp; // propellant-equivalent ship count
+  // largest asteroid (same density and spin) one ship could despin and capture on this pass
+  const need=dm=>{const Mx=P.rho*1000*Math.PI/6*dm*dm*dm;return despin(Mx,dm/1000,a.rotEff,P).prop+(Mx+md)*factor};
+  let lo=0,hi=5000;if(need(0.01)>mp)hi=0;else for(let k=0;k<60;k++){const mid=(lo+hi)/2;if(need(mid)<=mp)lo=mid;else hi=mid}
+  const dMax=hi>0?lo:0,mMax=dMax>0?P.rho*1000*Math.PI/6*Math.pow(dMax,3):0;
+  const tIn=tHyp(RA_MAX,best.rp,enc.vinf);
+  const flight=(enc.jd-jd1)-tIn/DAY;
+  const shiftOne=Math.min(dvAvail,1e9)*lever; // km of flyby shift a single ship buys
+  return{enc,T,lever,sinT,...best,dvAvail,dvAvailLo,burns,propNeed,feasible,feasibleLo,ships,mMax,dMax,tIn,flight,shiftOne,jd1,despinProp:ds.prop,despinT:ds.prop*P.isp*G0/(P.thr*1000)};
+}
+function fmtKm(km){return km>=1e6?(km/1e6).toFixed(2)+' M km':Math.round(km).toLocaleString('en-GB')+' km'}
+
+/* ---------- geocentric integration for the impact corridor ---------- */
+const ecl2eq=v=>[v[0],v[1]*Math.cos(OBL)-v[2]*Math.sin(OBL),v[1]*Math.sin(OBL)+v[2]*Math.cos(OBL)];
+const gmst=jd=>(((280.46061837+360.98564736629*(jd-J2000))%360)+360)%360;
+function flyby(bvec,S,vinf,jdCA){ // vectors geocentric equatorial km, km/s
+  const D=1.2e6;let r=v3.sub(bvec,v3.mul(S,D));const sp=Math.sqrt(vinf*vinf+2*MUE/v3.len(r));let v=v3.mul(S,sp);
+  const jd0=jdCA-D/vinf/DAY;let t=0,rmin=1e99,rminPos=null,rminT=0,path=[];
+  const acc=p=>{const l=v3.len(p);return v3.mul(p,-MUE/(l*l*l))};
+  for(let it=0;it<200000;it++){const rl=v3.len(r);
+    if(it%20===0)path.push(r);
+    if(rl<rmin){rmin=rl;rminPos=r;rminT=t}
+    if(rl<RE+100){return{impact:true,pos:r,jd:jd0+t/DAY,path,rmin:rl}}
+    if(rl>rmin*1.02&&v3.dot(r,v)>0&&rl>2e5){break}
+    const dt=Math.min(600,Math.max(0.5,0.002*rl/v3.len(v)));
+    const k1v=acc(r),k1r=v,k2v=acc(v3.add(r,v3.mul(k1r,dt/2))),k2r=v3.add(v,v3.mul(k1v,dt/2)),
+      k3v=acc(v3.add(r,v3.mul(k2r,dt/2))),k3r=v3.add(v,v3.mul(k2v,dt/2)),k4v=acc(v3.add(r,v3.mul(k3r,dt))),k4r=v3.add(v,v3.mul(k3v,dt));
+    r=v3.add(r,v3.mul(v3.add(v3.add(k1r,v3.mul(k2r,2)),v3.add(v3.mul(k3r,2),k4r)),dt/6));
+    v=v3.add(v,v3.mul(v3.add(v3.add(k1v,v3.mul(k2v,2)),v3.add(v3.mul(k3v,2),k4v)),dt/6));t+=dt}
+  return{impact:false,pos:rminPos,jd:jd0+rminT/DAY,path,rmin};
+}
+function latLon(pos,jd){const l=v3.len(pos);let lon=Math.atan2(pos[1],pos[0])*R2D-gmst(jd);lon=((lon+540)%360)-180;return{lat:Math.asin(pos[2]/l)*R2D,lon}}
+function corridor(pl){
+  const e=pl.enc,S=v3.norm(ecl2eq(e.vrel));let rr=ecl2eq(e.rrel);
+  let B=v3.sub(rr,v3.mul(S,v3.dot(rr,S)));if(v3.len(B)<1)B=v3.cross(S,[0,0,1]);const Bh=v3.norm(B);
+  const bcrit=bOf(RE+100,e.vinf),pts=[];
+  for(let k=0;k<=60;k++){const b=-bcrit+2*bcrit*k/60;const f=flyby(v3.mul(Bh,b),S,e.vinf,e.jd);if(f.impact)pts.push({b,...latLon(f.pos,f.jd)})}
+  const nom=flyby(v3.mul(Bh,pl.bt),S,e.vinf,e.jd);
+  return{pts,bcrit,nom:{...latLon(nom.pos,nom.jd),alt:nom.rmin-RE},Bh,S};
+}
+function gcKm(a,b){const p1=a.lat*D2R,p2=b.lat*D2R,dl=(b.lon-a.lon)*D2R;
+  return 6371*2*Math.asin(Math.sqrt(Math.sin((p2-p1)/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2))}
+
+/* ---------- import parsers ---------- */
+function parseImport(text){
+  const lines=text.split(/\r?\n/).map(s=>s.replace(/\s+$/,'')).filter(Boolean),out=[];
+  if(!lines.length)return out;
+  if(lines[0].includes(',')&&/(^|,)\s*"?a"?\s*(,|$)/.test(lines[0])){
+    const hd=lines[0].split(',').map(s=>s.replace(/"/g,'').trim().toLowerCase());const ix=n=>hd.indexOf(n);
+    for(const ln of lines.slice(1)){const c=ln.split(',').map(s=>s.replace(/"/g,'').trim());const g=n=>{const i=ix(n);return i<0||c[i]===''?null:parseFloat(c[i])};
+      const nm=(ix('full_name')>=0?c[ix('full_name')]:c[0]).trim();const ep=g('epoch');
+      if(g('a')==null)continue;
+      const d=g('diameter'),H=g('h');
+      out.push({id:'u'+out.length+nm,name:nm,el:{a:g('a'),e:g('e'),i:g('i'),om:g('om'),w:g('w'),M0:g('ma'),epoch:ep>3e6?jdFromISO(String(ep).replace(/(\d{4})(\d\d)(\d\d)/,'$1-$2-$3')):ep},
+        d:d||null,dLo:d?d*0.9:null,dHi:d?d*1.1:null,dSrc:d?'catalogue':'from H',rot:g('rot_per'),rotNote:'',H,anchor:null,known:[],user:true})}
+  }else{
+    for(const ln0 of lines){const [ln,rotS]=ln0.split('|');if(ln.length<181)continue;
+      /* astorb.dat fixed columns (0-based): number 0-6, name 7-25, H 42-48, diameter 59-64, epoch 106-114, M..a 114-181 */
+      const name=(ln.slice(0,6).trim()+' '+ln.slice(7,25).trim()).trim(),ep=ln.slice(106,114);if(!/^\d{8}$/.test(ep))continue;
+      const jd=jdFromISO(ep.slice(0,4)+'-'+ep.slice(4,6)+'-'+ep.slice(6,8)+'T00:00Z');
+      const [M,w,om,i,e,a]=ln.slice(114,181).trim().split(/\s+/).map(parseFloat),H=parseFloat(ln.slice(42,48)),diam=parseFloat(ln.slice(59,64))||0;
+      out.push({id:'u'+out.length+name,name,el:{a,e,i,om,w,M0:M,epoch:jd},d:diam>0?diam:null,dLo:diam>0?diam*0.9:null,dHi:diam>0?diam*1.1:null,
+        dSrc:diam>0?'IRAS':'from H',rot:rotS?parseFloat(rotS):null,rotNote:'',H,anchor:null,known:[],user:true})}
+  }
+  return out.filter(o=>[o.el.a,o.el.e,o.el.i,o.el.om,o.el.w,o.el.M0,o.el.epoch].every(Number.isFinite)&&o.el.e<1);
+}
+if(typeof module!=='undefined')module.exports={CATALOG,prepare,encounters,plan,mass,corridor,jdFromISO,fmtDate,parseImport,dvCap,state,earthState,AU};
+</script>
+
+<script>
+/* ===================== UI ===================== */
+const $=s=>document.querySelector(s);
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const sci=x=>{if(!isFinite(x))return'—';const e=Math.floor(Math.log10(Math.abs(x)));const m=x/Math.pow(10,e);
+  const sup=String(e).replace(/-/g,'⁻').replace(/\d/g,d=>'⁰¹²³⁴⁵⁶⁷⁸⁹'[d]);return m.toFixed(2)+'×10'+sup};
+const fmtV=kms=>{const m=kms*1000;return m>=1000?(kms).toFixed(2)+' km/s':m>=1?m.toFixed(1)+' m/s':m>=0.001?(m*1000).toFixed(2)+' mm/s':sci(m)+' m/s'};
+const fmtT=t=>t<1?((t*1000)<0.01?'<0.01 kg':(t*1000).toFixed(t*1000<10?2:0)+' kg'):t>=1000?(t/1000).toLocaleString('en-GB',{maximumFractionDigits:0})+' kt':t.toLocaleString('en-GB',{maximumFractionDigits:t<10?2:0})+' t';
+const fmtDur=s=>s<10?s.toFixed(s<1?2:1)+' s':s<120?s.toFixed(0)+' s':s<7200?(s/60).toFixed(1)+' min':(s/3600).toFixed(1)+' h';
+const fmtDays=d=>d>=365?d.toFixed(0)+' d ('+(d/365.25).toFixed(2)+' yr)':d.toFixed(0)+' d';
+
+let P={},ROWS=[],SEL=null,SELENC=null,VOPEN=true;
+function readP(){const g=id=>parseFloat($(id).value);
+  P={prop:g('#pProp'),isp:g('#pIsp'),dry:g('#pDry'),thr:g('#pThr'),rho:g('#pRho'),gimbal:g('#pGim'),shipLen:g('#pLen'),rhoLo:g('#pRhoLo'),rhoHi:g('#pRhoHi'),jd1:jdFromISO(($('#pStart').value||'2027-01-01')+'T00:00Z')};}
+
+function analyseOne(a){a.analysed=true;a.M=mass(a,P);
+  if(!a.eligible){a.encs=[];a.plans=[];a.best=null;return}   // excluded asteroids are not planned
+  a.encs=encounters(a,P.jd1+30,25);a.plans=a.encs.map(e=>plan(a,e,P.jd1,P,a.M)).filter(Boolean);
+  const feas=a.plans.filter(p=>p.feasible);a.best=feas.length?feas[0]:a.plans.slice().sort((x,y)=>x.tot-y.tot)[0]||null}
+/* analyse in the background in ~30 ms slices so the page stays responsive */
+let AGEN=0;
+function analyseAll(done){readP();for(const a of ROWS)a.analysed=false;const q=ROWS.slice().sort((x,y)=>(x.eligible-y.eligible));const gen=++AGEN;let last=0;
+  (function step(){if(gen!==AGEN)return;const t=performance.now();
+    while(q.length&&performance.now()-t<30){const a=q.shift();if(!a.analysed)analyseOne(a)}
+    if(!q.length||performance.now()-last>400){renderList();last=performance.now()}
+    if(q.length)setTimeout(step,0);else{renderList();if(done)done()}})()}
+
+function renderList(){
+  const ul=$('#list');ul.innerHTML='';let n=0,shown=0;
+  const q=($('#listQ').value||'').trim().toLowerCase(),showEx=$('#listEx').checked;
+  const mode=$('#listSort').value;
+  const passJd=a=>a.eligible&&a.encs&&a.encs[0]?a.encs[0].jd:(a.caDate?jdFromISO(a.caDate+'T00:00Z'):1e9);
+  const yr=a=>{const j=passJd(a);return j>=1e9?9999:dateFromJd(j).getUTCFullYear()};
+  const cmp={feas:(x,y)=>(y.eligible-x.eligible)||((x.best?x.best.ships:1e99)-(y.best?y.best.ships:1e99))||((x.caAU??9)-(y.caAU??9)),
+    date:(x,y)=>passJd(x)-passJd(y),
+    dateSizeUp:(x,y)=>(yr(x)-yr(y))||(x.d-y.d),dateSizeDown:(x,y)=>(yr(x)-yr(y))||(y.d-x.d),
+    sizeUp:(x,y)=>x.d-y.d,sizeDown:(x,y)=>y.d-x.d}[mode];
+  const sorted=ROWS.slice().sort(cmp);
+  for(const a of ROWS)if(a.eligible)n++;
+  for(const a of sorted){
+    if(q&&!a.name.toLowerCase().includes(q))continue;
+    if(!showEx&&!a.eligible&&a!==SEL&&!q)continue;
+    shown++;
+    const li=document.createElement('li');if(!a.eligible)li.className='ex';if(SEL===a)li.classList.add('sel');
+    let pill;
+    if(!a.eligible)pill=`<span class="pill mut">${a.reason}</span>`;
+    else if(!a.analysed)pill=`<span class="pill mut">…</span>`;
+    else if(!a.best)pill=`<span class="pill mut">no pass</span>`;
+    else if(a.best.feasible)pill=`<span class="pill ok">feasible</span>`;
+    else pill=`<span class="pill bad">×${a.best.ships<1e4?Math.ceil(a.best.ships).toLocaleString('en-GB'):sci(a.best.ships)} ships</span>`;
+    const nx=a.encs&&a.encs[0];
+    const dTxt=a.d<1?(a.d*1000).toFixed(0)+' m':a.d.toFixed(2)+' km';
+    const pass=a.eligible&&nx?' · pass '+fmtDate(nx.jd):(a.caDate?' · '+a.caDate+', '+(a.caAU*389.17).toFixed(2)+' LD':'');
+    li.innerHTML=`<button type="button"><span class="dot"></span><span class="nm">${a.name}</span>${pill}<span class="meta">d ${dTxt} · P ${a.rot==null?'~'+a.rotEff.toFixed(2)+' h (assumed)':a.rot.toFixed(1)+' h'}${pass}</span></button>`;
+    li.querySelector('button').onclick=()=>select(a);ul.appendChild(li)}
+  if(!shown)ul.innerHTML='<li class="empty" style="padding:12px">No matches.</li>';
+  const pend=ROWS.filter(a=>a.eligible&&!a.analysed).length;
+  $('#countPill').textContent=pend?`analysing ${n-pend}/${n}`:n+' eligible / '+ROWS.length+' · '+ROWS.filter(a=>a.best&&a.best.feasible).length+' feasible';
+}
+
+function select(a,pl){if(!a.analysed)analyseOne(a);SEL=a;SELENC=pl||a.best||null;renderList();renderAnalysis();renderBurns();renderEncs();apReset();drawApproach();drawMap();scene.onSelect();}
+
+function renderAnalysis(){
+  const a=SEL,el=$('#analysis');$('#aTitle').textContent=a?a.name:'Analysis';if(!a){return}
+  const M=a.M,pl=SELENC;let kind,title,msg,budget='';
+  if(!a.eligible){kind='mut';title='Excluded';msg=a.reasonLong}
+  else if(!pl){kind='mut';title='No usable pass';msg='No natural approach under 0.8 AU in the 25 years after the first burn.'}
+  else if(pl.feasible){kind='ok';title='One Starship is enough';msg=`Needs ${fmtV(pl.tot)} of the ${fmtV(pl.dvAvail)} available.`}
+  else{kind='bad';title='Not feasible with one Starship';msg=`Needs ${fmtV(pl.tot)}; one ship gives ${fmtV(pl.dvAvail)}. That is about ${pl.ships<1e4?Math.ceil(pl.ships).toLocaleString('en-GB'):sci(pl.ships)} Starships' worth of propellant.${pl.feasibleLo?' Feasible only at the low-mass bound.':''}`}
+  if(a.eligible&&pl){const pct=Math.min(100,pl.dvAvail/pl.tot*100);
+    budget=`<div class="vbody"><dl class="kv">
+      <dt>Despin propellant</dt><dd>${fmtT(pl.despinProp/1000)} <small>${(pl.despinProp/(P.prop*1000)*100).toFixed(pl.despinProp/(P.prop*1000)<0.01?3:1)}% of load</small></dd>
+      <dt>Required Δv</dt><dd>${fmtV(pl.tot)}</dd><dt>One Starship after despin</dt><dd>${fmtV(pl.dvAvail)}</dd>
+      <dt>One Starship (low-mass bound)</dt><dd>${fmtV(pl.dvAvailLo)}</dd>
+      <dt>Flyby shift one ship buys</dt><dd>${fmtKm(Math.min(pl.shiftOne,1e12))}</dd>
+      <dt>Largest capturable here (same spin)</dt><dd>${pl.dMax>0?(pl.dMax).toFixed(1)+' m <small>'+sci(pl.mMax)+' kg</small>':'none'}</dd></dl>
+      <div class="bar" title="Share of required Δv one Starship supplies"><i style="width:${Math.max(pct,0.4)}%"></i></div>
+      <p class="note">${pct>=100?'Margin '+(pl.dvAvail/pl.tot*100-100).toFixed(0)+'%':'One ship supplies '+(pct<0.01?pct.toExponential(1):pct.toFixed(pct<1?3:1))+'% of the requirement.'}</p></div>`}
+  const v=`<details class="verdict ${kind}" id="verdictBox"${VOPEN?' open':''}><summary><b>${title}</b></summary><p>${msg}</p>${budget}</details>`;
+  let h=v+`<dl class="kv">
+    <dt>Diameter</dt><dd>${a.d.toFixed(3)} km <small>(${a.dLo.toFixed(2)}–${a.dHi.toFixed(2)}, ${a.dSrc})</small></dd>
+    <dt>Rotation</dt><dd>${a.rot==null?a.rotEff.toFixed(2)+' h':a.rot.toFixed(1)+' h'} <small>${a.rotAssumed?'assumed (unknown)':(a.rotNote||'')}</small></dd>
+    <dt>Mass, nominal</dt><dd>${sci(M.nom)} kg</dd>
+    <dt>Mass bounds</dt><dd>${sci(M.lo)} – ${sci(M.hi)} kg</dd>
+    <dt>Bound spread</dt><dd>−${((1-M.lo/M.nom)*100).toFixed(0)}% / +${((M.hi/M.nom-1)*100).toFixed(0)}%</dd>
+    <dt>Orbit a / e / i</dt><dd>${a.el.a.toFixed(3)} AU / ${a.el.e.toFixed(3)} / ${a.el.i.toFixed(2)}°</dd>
+    ${a.caDate?`<dt>Next close pass (astorb scan)</dt><dd>${a.caDate} <small>${(a.caAU*389.17).toFixed(2)} LD</small></dd>`:''}
+    ${a.arc?`<dt>Observed arc</dt><dd>${a.arc.toLocaleString('en-GB')} d</dd>`:''}</dl>
+    <form class="rotset" id="rotForm"><label for="rotIn" class="note" style="margin:0">${a.rot==null?'Known rotation period (h)':'Override rotation period (h)'}</label><input id="rotIn" type="number" min="0.01" step="0.01" value="${a.rot??''}" required><button class="b" type="submit">Apply</button></form>`;
+  if(a.eligible&&pl){const e=pl.enc;
+    h+=`<div class="sec"><h3>Selected pass</h3><dl class="kv">
+      <dt>Natural closest approach</dt><dd>${fmtDate(e.jd)}${e.published?' <small>published</small>':''}</dd>
+      <dt>Miss distance (b₀)</dt><dd>${fmtKm(e.b0)} <small>${(e.b0/384400).toFixed(1)} LD</small></dd>
+      <dt>Approach speed v∞</dt><dd>${e.vinf.toFixed(2)} km/s</dd>
+      <dt>Target perigee</dt><dd>${fmtKm(pl.rp-RE)} alt.</dd>
+      <dt>Flight time to 100k mi</dt><dd>${fmtDays(pl.flight)}</dd></dl></div>`}
+  el.innerHTML=h;
+  $('#verdictBox').addEventListener('toggle',e=>{VOPEN=e.target.open});
+  $('#rotForm').addEventListener('submit',e=>{e.preventDefault();const v=parseFloat($('#rotIn').value);if(!(v>0))return;
+    a.rot=v;a.rotNote='entered by you';prepare(a);analyseOne(a);if(scene.rebuild)scene.rebuild();select(a)});
+}
+
+function renderBurns(){
+  const a=SEL,pl=SELENC,box=$('#burns');
+  if(!a||!a.eligible||!pl){box.innerHTML=`<div class="empty">${a?'No burn plan for this asteroid.':'No asteroid selected.'}</div>`;$('#burnPill').textContent='';return}
+  $('#burnPill').textContent=pl.feasible?'within one ship':'requires '+(pl.ships<1e4?Math.ceil(pl.ships).toLocaleString('en-GB'):sci(pl.ships))+' ships';
+  $('#burnPill').className='pill '+(pl.feasible?'ok':'bad');
+  let h=`<table><thead><tr><th>#</th><th>Burn</th><th>Date</th><th style="text-align:right">Δv</th><th style="text-align:right">Propellant</th><th style="text-align:right">Burn time*</th></tr></thead><tbody>`;
+  pl.burns.forEach((b,i)=>{h+=`<tr><td class="n">${i+1}</td><td><b>${b.nm}</b><br><span class="note" style="margin:0">${b.txt}</span></td><td class="n">${fmtDate(b.jd)}</td><td class="n">${b.despin?'spin → 0':fmtV(b.dv)}</td><td class="n">${fmtT(b.prop/1000)}</td><td class="n">${fmtDur(b.dur)}</td></tr>`});
+  h+=`<tr><td></td><td><b>Total</b></td><td class="n">${fmtDays(pl.flight)} to 100k mi</td><td class="n"><b>${fmtV(pl.tot)}</b></td><td class="n"><b>${fmtT(pl.propNeed/1000)}</b></td><td class="n"></td></tr></tbody></table>
+  <p class="note">*At ${P.thr.toLocaleString('en-GB')} kN. Propellant carried: ${fmtT(P.prop)}. ${pl.feasible?'Remaining after capture: '+fmtT(P.prop-pl.propNeed/1000)+'.':'Propellant figures show what the plan would consume from a single (impossibly large) tank; one ship runs dry during Burn '+(pl.burns.findIndex((b,i)=>pl.burns.slice(0,i+1).reduce((s,x)=>s+x.prop,0)>P.prop*1000)+1)+'.'} Burn 1 is placed as early as allowed, because every day of lead time multiplies its lever arm.</p>`;
+  box.innerHTML=h;
+}
+
+function renderEncs(){
+  const a=SEL,box=$('#encs');if(!a||!a.eligible||!a.plans.length){box.innerHTML=`<div class="empty">${a?'No encounters to plan.':'No asteroid selected.'}</div>`;return}
+  let h=`<table><thead><tr><th>Pass</th><th style="text-align:right">b₀</th><th style="text-align:right">v∞</th><th style="text-align:right">Δv needed</th><th style="text-align:right">Ships</th></tr></thead><tbody>`;
+  a.plans.forEach((p,i)=>{h+=`<tr class="clk${p===SELENC?' pick':''}" data-i="${i}" tabindex="0"><td class="n" style="text-align:left">${fmtDate(p.enc.jd)}</td><td class="n">${(p.enc.b0/AU).toFixed(3)} AU</td><td class="n">${p.enc.vinf.toFixed(2)} km/s</td><td class="n">${fmtV(p.tot)}</td><td class="n">${p.feasible?'<span class="pill ok">1</span>':(p.ships<1e5?Math.ceil(p.ships).toLocaleString('en-GB'):sci(p.ships))}</td></tr>`});
+  box.innerHTML=h+'</tbody></table>';
+  box.querySelectorAll('tr.clk').forEach(tr=>{const go=()=>select(a,a.plans[+tr.dataset.i]);tr.onclick=go;tr.onkeydown=e=>{if(e.key==='Enter')go()}});
+}
+
+/* ---------- approach plot ---------- */
+function fitCanvas(c){if(!c.dataset.h)c.dataset.h=c.getAttribute('height');const H=parseFloat(c.dataset.h),r=c.getBoundingClientRect(),dpr=devicePixelRatio||1;
+  c.style.height=H+'px';const W=Math.round(r.width*dpr),HH=Math.round(H*dpr);if(c.width!==W)c.width=W;if(c.height!==HH)c.height=HH;const x=c.getContext('2d');x.setTransform(dpr,0,0,dpr,0,0);return{x,w:r.width,h:H}}
+const MI2M=3218688; // 2 million miles in km
+const AP={zoom:1,panX:0,panY:0,t:0,tMin:-3600,tMax:3600,playing:false,last:0,geom:null};
+function apGeom(pl){const vinf=pl.enc.vinf,rp=pl.rp,a=-MUE/(vinf*vinf),e=1+rp*vinf*vinf/MUE,ae=(rp+RA_MAX)/2,ee=(RA_MAX-rp)/(RA_MAX+rp);
+  return{vinf,rp,a,e,ae,ee,nh:Math.sqrt(MUE/Math.pow(-a,3)),ne:Math.sqrt(MUE/Math.pow(ae,3)),Pe:2*Math.PI*Math.sqrt(Math.pow(ae,3)/MUE)}}
+function hypPos(g,t){const N=g.nh*t;let F=Math.asinh(N/g.e);for(let k=0;k<50;k++){const d=(g.e*Math.sinh(F)-F-N)/(g.e*Math.cosh(F)-1);F-=d;if(Math.abs(d)<1e-12)break}
+  const r=g.a*(1-g.e*Math.cosh(F)),nu=2*Math.atan(Math.sqrt((g.e+1)/(g.e-1))*Math.tanh(F/2));return[r*Math.cos(nu),r*Math.sin(nu),r]}
+function ellPos(g,t){const M=(g.ne*t)%(2*Math.PI),E=solveKepler(M,g.ee),nu=2*Math.atan2(Math.sqrt(1+g.ee)*Math.sin(E/2),Math.sqrt(1-g.ee)*Math.cos(E/2)),r=g.ae*(1-g.ee*Math.cos(E));return[r*Math.cos(nu),r*Math.sin(nu),r]}
+function apReset(){const pl=SELENC;AP.playing=false;$('#apPlay').textContent='Play';
+  if(pl&&SEL&&SEL.eligible){AP.geom=apGeom(pl);AP.tMin=-tHyp(MI2M,pl.rp,pl.enc.vinf);AP.tMax=Math.max(AP.geom.Pe*1.02,-AP.tMin)}else AP.geom=null;
+  AP.t=AP.tMin;$('#apSlider').value=0}
+function apView(){AP.zoom=1;AP.panX=0;AP.panY=0;drawApproach()}
+function fmtHrs(s){const sg=s<0?'T−':'T+',a=Math.abs(s);return sg+(a<36*3600?(a/3600).toFixed(1)+' h':(a/86400).toFixed(2)+' d')}
+function drawApproach(){
+  const {x,w,h}=fitCanvas($('#approach'));x.clearRect(0,0,w,h);const pl=SELENC;
+  const sc=Math.min(w,h)/2/420000*AP.zoom,cx=w*0.42+AP.panX,cy=h/2+AP.panY;const P2=(px,py)=>[cx+px*sc,cy-py*sc];AP.sc=sc;AP.cx=cx;AP.cy=cy;
+  x.font='11px '+css('--mono');x.lineWidth=1;
+  // moon orbit & 100k mile ring
+  x.strokeStyle=css('--line');x.setLineDash([2,4]);x.beginPath();x.arc(cx,cy,384400*sc,0,7);x.stroke();
+  x.strokeStyle=css('--muted');x.setLineDash([5,4]);x.beginPath();x.arc(cx,cy,RA_MAX*sc,0,7);x.stroke();x.setLineDash([]);
+  x.strokeStyle=css('--muted');x.setLineDash([1,5]);x.beginPath();x.arc(cx,cy,MI2M*sc,0,7);x.stroke();x.setLineDash([]);
+  x.fillStyle=css('--muted');x.fillText('2,000,000 mi',cx+MI2M*sc*0.71+4,cy-MI2M*sc*0.71);x.fillText('Moon orbit',cx+384400*sc*0.7+4,cy-384400*sc*0.7);x.fillText('100,000 mi',cx+RA_MAX*sc*0.71+4,cy-RA_MAX*sc*0.71);
+  x.fillStyle=css('--cool');x.beginPath();x.arc(cx,cy,Math.max(3,RE*sc),0,7);x.fill();
+  if(!pl||!SEL||!SEL.eligible){x.fillStyle=css('--muted');x.fillText(SEL&&!SEL.eligible?'Excluded: no capture planned':'Select an eligible asteroid',12,20);
+    $('#apClock').textContent='';
+    $('#apNote').textContent=SEL&&!SEL.eligible?`${SEL.name} is excluded (${SEL.reason}), so no burns or approach are calculated. Enter a measured rotation period over 24 h in the analysis panel to plan it.`:'Geocentric view of the final approach.';return}
+  const vinf=pl.enc.vinf,rp=pl.rp,a=-MUE/(vinf*vinf),e=1+rp*vinf*vinf/MUE,p=a*(1-e*e),hypPts=sg=>{const pts=[];for(let k=0;k<=400;k++){const r=MI2M*1.05*Math.pow(rp/(MI2M*1.05),k/400),nu=sg*Math.acos(Math.max(-1,Math.min(1,(p/r-1)/e)));pts.push([r*Math.cos(nu),r*Math.sin(nu)])}return pts};
+  // hyperbola (failure path), periapsis on +x
+  x.strokeStyle=css('--bad');x.setLineDash([6,4]);x.beginPath();let first=true;
+  hypPts(-1).concat(hypPts(1).reverse()).forEach(([px,py],k)=>{const [X,Y]=P2(px,py);k?x.lineTo(X,Y):x.moveTo(X,Y)});
+  x.stroke();x.setLineDash([]);
+  // incoming leg solid amber until periapsis
+  x.strokeStyle=css('--accent');x.lineWidth=2;x.beginPath();first=true;
+  hypPts(-1).forEach(([px,py],k)=>{const [X,Y]=P2(px,py);k?x.lineTo(X,Y):x.moveTo(X,Y)});
+  x.stroke();
+  // captured ellipse
+  const ae=(rp+RA_MAX)/2,ee=(RA_MAX-rp)/(RA_MAX+rp),be=ae*Math.sqrt(1-ee*ee);x.strokeStyle=css('--ok');x.beginPath();
+  for(let t=0;t<=6.3;t+=0.02){const [X,Y]=P2(ae*Math.cos(t)-(ae-rp),be*Math.sin(t));t?x.lineTo(X,Y):x.moveTo(X,Y)}x.stroke();x.lineWidth=1;
+  const [bx,by]=P2(rp,0);x.strokeStyle=css('--accent');x.beginPath();x.arc(bx,by,5,0,7);x.stroke();
+  x.fillStyle=css('--muted');x.fillText('Burn 3',bx+8,by+4);
+  // moving markers
+  if(!AP.geom)AP.geom=apGeom(pl);const g=AP.geom,dot=(p,c,lab)=>{const [X,Y]=P2(p[0],p[1]);x.fillStyle=css(c);x.beginPath();x.arc(X,Y,5,0,7);x.fill();if(lab){x.fillStyle=css('--fg');x.fillText(lab,X+8,Y-6)}};
+  if(AP.t<0){const p=hypPos(g,AP.t);dot(p,'--accent','alt '+fmtKm(p[2]-RE))}
+  else{const pe=ellPos(g,AP.t),ph=hypPos(g,AP.t);dot(ph,'--bad','no burn');dot(pe,'--ok','captured')}
+  $('#apClock').textContent=fmtHrs(AP.t)+' perigee · '+dateFromJd(pl.enc.jd+AP.t/DAY).toISOString().slice(0,16).replace('T',' ')+' UTC';
+  // legend
+  const L=[['--accent','approach'],['--ok','captured orbit (Burn 3 fires)'],['--bad','flyby if Burn 3 fails']];
+  x.fillStyle=css('--panel2');x.globalAlpha=0.85;x.fillRect(6,6,206,54);x.globalAlpha=1;
+  L.forEach(([c,t],i)=>{x.strokeStyle=css(c);x.lineWidth=2;x.beginPath();x.moveTo(12,18+i*16);x.lineTo(32,18+i*16);x.stroke();x.fillStyle=css('--fg');x.fillText(t,38,22+i*16)});x.lineWidth=1;
+  x.fillStyle=css('--muted');x.fillText('perigee '+fmtKm(rp-RE)+' alt · v∞ '+vinf.toFixed(2)+' km/s · Burn 3 '+fmtV(pl.dv3),12,h-12);
+  $('#apNote').textContent=`Entering the 100,000-mile sphere ${(pl.tIn/3600).toFixed(1)} h before perigee; the captured orbit takes ${(g.Pe/86400).toFixed(2)} days. If the capture burn fails the asteroid swings past at ${fmtKm(rp-RE)} altitude and leaves: no impact. Scroll or pinch to zoom, drag to pan.`;
+}
+function apInit(){
+  const c=$('#approach');
+  const zoomAt=(f,mx,my)=>{const nz=Math.min(400,Math.max(420000/(MI2M*1.08),AP.zoom*f)),k=nz/AP.zoom;const r=c.getBoundingClientRect(),w=r.width,h=parseFloat(c.dataset.h||c.getAttribute('height'));
+    const ox=w*0.42,oy=h/2;mx=mx??w/2;my=my??h/2;AP.panX=mx-ox-(mx-(ox+AP.panX))*k;AP.panY=my-oy-(my-(oy+AP.panY))*k;AP.zoom=nz;drawApproach()};
+  c.addEventListener('wheel',e=>{e.preventDefault();const r=c.getBoundingClientRect();zoomAt(Math.exp(-e.deltaY*0.0015),e.clientX-r.left,e.clientY-r.top)},{passive:false});
+  const ptrs=new Map();let pinch0=0;
+  c.addEventListener('pointerdown',e=>{c.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);c.style.cursor='grabbing';
+    if(ptrs.size===2){const [a,b]=[...ptrs.values()];pinch0=Math.hypot(a[0]-b[0],a[1]-b[1])}});
+  c.addEventListener('pointermove',e=>{if(!ptrs.has(e.pointerId))return;const prev=ptrs.get(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);
+    if(ptrs.size===1){AP.panX+=e.clientX-prev[0];AP.panY+=e.clientY-prev[1];drawApproach()}
+    else if(ptrs.size===2){const [a,b]=[...ptrs.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]),r=c.getBoundingClientRect();if(pinch0){zoomAt(d/pinch0,(a[0]+b[0])/2-r.left,(a[1]+b[1])/2-r.top)}pinch0=d}});
+  const up=e=>{ptrs.delete(e.pointerId);pinch0=0;if(!ptrs.size)c.style.cursor='grab'};c.addEventListener('pointerup',up);c.addEventListener('pointercancel',up);
+  $('#apZin').onclick=()=>zoomAt(1.6);$('#apZout').onclick=()=>zoomAt(1/1.6);$('#apZreset').onclick=apView;$('#apZfar').onclick=()=>{AP.zoom=420000/(MI2M*1.08);AP.panX=0;AP.panY=0;drawApproach()};
+  $('#apSlider').oninput=e=>{AP.t=AP.tMin+(AP.tMax-AP.tMin)*e.target.value/1000;AP.playing=false;$('#apPlay').textContent='Play';drawApproach()};
+  $('#apPlay').onclick=()=>{if(!AP.geom)return;AP.playing=!AP.playing;$('#apPlay').textContent=AP.playing?'Pause':'Play';if(AP.playing){if(AP.t>=AP.tMax)AP.t=AP.tMin;AP.last=performance.now();requestAnimationFrame(apTick)}};
+}
+function apTick(now){if(!AP.playing)return;const dt=Math.min(0.1,(now-AP.last)/1000);AP.last=now;
+  AP.t+=dt*parseFloat($('#apSpeed').value);if(AP.t>=AP.tMax){AP.t=AP.tMax;AP.playing=false;$('#apPlay').textContent='Play'}
+  $('#apSlider').value=(AP.t-AP.tMin)/(AP.tMax-AP.tMin)*1000;drawApproach();if(AP.playing)requestAnimationFrame(apTick)}
+
+/* ---------- impact map ---------- */
+const COARSE=[ // fallback continents [lon,lat]
+ [[-168,66],[-140,70],[-95,72],[-80,63],[-65,60],[-55,50],[-70,42],[-81,30],[-82,25],[-97,26],[-97,20],[-87,15],[-78,8],[-85,10],[-105,20],[-117,32],[-124,40],[-124,48],[-135,58],[-152,60],[-165,62]],
+ [[-78,8],[-60,10],[-50,0],[-35,-6],[-40,-22],[-55,-35],[-65,-42],[-68,-55],[-74,-50],[-72,-30],[-71,-18],[-81,-5],[-78,1]],
+ [[-10,36],[0,43],[-9,43],[-9,52],[0,58],[10,57],[5,62],[15,69],[30,70],[45,68],[70,73],[100,77],[140,72],[180,69],[170,60],[142,52],[135,43],[122,40],[122,30],[110,20],[105,10],[100,13],[98,8],[90,22],[80,15],[77,8],[72,20],[57,25],[50,30],[56,26],[44,12],[33,28],[35,36],[27,36],[25,40],[20,40],[15,38],[12,44],[3,43],[-5,36]],
+ [[-17,21],[-10,6],[8,4],[10,-2],[12,-17],[18,-34],[26,-34],[33,-26],[40,-15],[40,-2],[51,12],[43,12],[33,30],[10,37],[-6,35]],
+ [[114,-22],[122,-18],[131,-12],[137,-12],[142,-11],[146,-19],[153,-26],[150,-37],[141,-38],[131,-31],[115,-34]],
+ [[-55,60],[-40,60],[-20,70],[-25,82],[-60,82],[-73,77]],
+ [[-180,-78],[-60,-63],[0,-70],[90,-66],[180,-78],[180,-90],[-180,-90]]];
+function drawMap(){
+  const {x,w,h}=fitCanvas($('#map'));x.clearRect(0,0,w,h);
+  const mw=Math.min(w,h*2),mh=mw/2,ox=(w-mw)/2,oy=(h-mh)/2,X=lon=>ox+(lon+180)/360*mw,Y=lat=>oy+(90-lat)/180*mh;
+  x.strokeStyle=css('--line');x.lineWidth=0.5;
+  for(let lo=-180;lo<=180;lo+=30){x.beginPath();x.moveTo(X(lo),Y(90));x.lineTo(X(lo),Y(-90));x.stroke()}
+  for(let la=-90;la<=90;la+=30){x.beginPath();x.moveTo(X(-180),Y(la));x.lineTo(X(180),Y(la));x.stroke()}
+  x.fillStyle=css('--line');x.strokeStyle=css('--muted');x.lineWidth=0.6;
+  const geo=window.am4geodata_worldLow;
+  const ring=r=>{x.beginPath();r.forEach(([lo,la],i)=>{i?x.lineTo(X(lo),Y(la)):x.moveTo(X(lo),Y(la))});x.closePath();x.fill();x.stroke()};
+  if(geo&&geo.features){for(const f of geo.features){const g=f.geometry;if(!g)continue;const polys=g.type==='Polygon'?[g.coordinates]:g.type==='MultiPolygon'?g.coordinates:[];polys.forEach(p=>p.forEach(ring))}}
+  else COARSE.forEach(ring);
+  const pl=SELENC;$('#mapPill').textContent='';
+  if(!SEL||!SEL.eligible||!pl){$('#mapNote').textContent='Select an eligible asteroid to compute its impact corridor.';return}
+  const C=corridor(pl);
+  // corridor
+  x.strokeStyle=css('--bad');x.lineWidth=3;x.lineCap='round';
+  for(let i=1;i<C.pts.length;i++){const a=C.pts[i-1],b=C.pts[i];if(Math.abs(a.lon-b.lon)>180)continue;x.beginPath();x.moveTo(X(a.lon),Y(a.lat));x.lineTo(X(b.lon),Y(b.lat));x.stroke()}
+  x.fillStyle=css('--bad');C.pts.forEach(p=>{x.beginPath();x.arc(X(p.lon),Y(p.lat),2.2,0,7);x.fill()});
+  // nominal perigee ground point
+  x.strokeStyle=css('--accent');x.lineWidth=2;const nx=X(C.nom.lon),ny=Y(C.nom.lat);x.beginPath();x.moveTo(nx-5,ny-5);x.lineTo(nx+5,ny+5);x.moveTo(nx+5,ny-5);x.lineTo(nx-5,ny+5);x.stroke();
+  x.font='11px '+css('--mono');x.fillStyle=css('--fg');x.fillText('perigee ground point',Math.min(nx+8,w-140),ny-6);
+  let len=0;for(let i=1;i<C.pts.length;i++)len+=gcKm(C.pts[i-1],C.pts[i]);
+  $('#mapPill').textContent=C.pts.length?Math.round(len).toLocaleString('en-GB')+' km long':'';
+  const ends=C.pts.length?`from ${C.pts[0].lat.toFixed(1)}°, ${C.pts[0].lon.toFixed(1)}° to ${C.pts[C.pts.length-1].lat.toFixed(1)}°, ${C.pts[C.pts.length-1].lon.toFixed(1)}°`:'';
+  $('#mapNote').textContent=`Red: where the asteroid would strike if Burn 1 mis-targets so the flyby slides inside Earth's capture radius (b < ${fmtKm(C.bcrit)}), for the pass of ${fmtDate(pl.enc.jd)}; ${ends}. Gravity focusing pulls the corridor toward the sub-asteroid side. Cross: point beneath the planned perigee. A failed capture burn alone causes a safe flyby, not an impact. Timing uncertainty rotates the corridor east–west (15° per hour).`;
+}
+
+/* ===================== 3D SCENE ===================== */
+const SCL=10/AU; // 1 AU = 10 units
+const toV=r=>new THREE.Vector3(r[0]*SCL,r[2]*SCL,-r[1]*SCL);
+const scene={};
+scene.init=function(){
+  if(!window.THREE){$('#viewWrap').insertAdjacentHTML('beforeend','<p class="empty" style="position:absolute;top:40%;width:100%;text-align:center">3D library did not load; the analysis panels still work.</p>');scene.onSelect=()=>{};return}
+  const cv=$('#view'),R=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:true});R.setPixelRatio(devicePixelRatio||1);
+  const S=new THREE.Scene(),cam=new THREE.PerspectiveCamera(45,1,0.01,500);cam.position.set(0,26,10);
+  const ctl=THREE.OrbitControls?new THREE.OrbitControls(cam,cv):null;if(ctl){ctl.enableDamping=true;ctl.minDistance=2;ctl.maxDistance=120}
+  const col=n=>new THREE.Color(css(n));
+  const sun=new THREE.Mesh(new THREE.SphereGeometry(0.25,24,16),new THREE.MeshBasicMaterial({color:col('--sun')}));S.add(sun);
+  const orbitLine=(el,c,op=1,dash=false)=>{const pts=[];const per=periodS(el)/DAY;for(let k=0;k<=360;k++)pts.push(toV(state(el,el.epoch+per*k/360).r));
+    const g=new THREE.BufferGeometry().setFromPoints(pts);const m=new THREE.LineBasicMaterial({color:c,transparent:true,opacity:op});return new THREE.Line(g,m)};
+  const planets={};
+  for(const nm of Object.keys(PLANETS)){const el=planetEl(nm,P.jd1);const ln=orbitLine(el,nm==='Earth'?col('--earth'):col('--muted'),nm==='Earth'?1:0.45);if(nm==='Earth'){ln.renderOrder=9;ln.material.depthTest=false;ln.material.depthWrite=false}S.add(ln);
+    const m=new THREE.Mesh(new THREE.SphereGeometry(nm==='Earth'?0.12:0.08,16,12),new THREE.MeshBasicMaterial({color:nm==='Earth'?col('--earth'):nm==='Mars'?col('--warn'):col('--fg')}));if(nm==='Earth'){m.renderOrder=12;m.material.depthTest=false}S.add(m);planets[nm]={m,ln}}
+  const asts=[];
+  const labels=$('#labels');
+  function buildAsts(){asts.forEach(o=>{S.remove(o.ln);S.remove(o.m);S.remove(o.hit);o.lab.remove()});asts.length=0;
+    for(const a of ROWS){const c=a.eligible?col('--cool'):col('--muted');const ln=orbitLine(a.elA,c,a.eligible?0.1:0.1);ln.visible=a.eligible;S.add(ln);
+      const m=new THREE.Mesh(new THREE.SphereGeometry(a.eligible?0.07:0.04,10,8),new THREE.MeshBasicMaterial({color:c}));S.add(m);
+      const hit=new THREE.Mesh(new THREE.SphereGeometry(a.eligible?0.35:0.2,8,6),new THREE.MeshBasicMaterial({visible:false}));hit.userData.a=a;S.add(hit);
+      const lab=document.createElement('span');lab.className=a.eligible?'ast':'';lab.textContent=a.name.replace(/^\(\d+\)\s*/,'');labels.appendChild(lab);
+      asts.push({a,ln,m,hit,lab})}}
+  scene.vis=()=>{const showEx=$('#listEx').checked;asts.forEach(o=>{const sel=o.a===SEL,on=o.a.eligible||showEx||sel;
+    o.m.visible=on;o.hit.visible=on;o.ln.visible=o.a.eligible||sel;o.ln.material.opacity=sel?1:0.09;o.ln.renderOrder=sel?10:0;o.ln.material.depthTest=!sel;o.ln.material.depthWrite=false;o.m.renderOrder=sel?12:0;o.m.material.depthTest=!sel;o.m.material.transparent=!sel;o.m.material.opacity=sel?1:0.55;
+    const c=sel?col('--sel'):(o.a.eligible?col('--cool'):col('--muted'));o.ln.material.color=c;o.m.material.color=c;
+    o.lab.className=sel?'sel':(o.a.eligible?'ast':'')})};
+  buildAsts();scene.rebuild=()=>{buildAsts();scene.vis()};
+  const plab={};for(const nm of Object.keys(PLANETS)){const s=document.createElement('span');s.textContent=nm;labels.appendChild(s);plab[nm]=s}
+  // trajectory overlay
+  let traj=null,earthMark=null;
+  let jdA=P.jd1,jdNow=P.jd1,jdEnd=P.jd1+3*365,playing=false,lastT=0;
+  scene.onSelect=function(){
+    if(traj){S.remove(traj);traj=null}if(earthMark){S.remove(earthMark);earthMark=null}
+    scene.vis();
+    const pl=SELENC;
+    if(SEL&&SEL.eligible&&pl){const pts=[];const n=400;for(let k=0;k<=n;k++){const jd=pl.jd1+(pl.enc.jd-pl.jd1)*k/n;pts.push(toV(state(SEL.elA,jd).r))}
+      traj=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:col('--accent'),linewidth:2,depthTest:false,transparent:true}));traj.renderOrder=11;S.add(traj);
+      earthMark=new THREE.Mesh(new THREE.RingGeometry(0.22,0.27,32),new THREE.MeshBasicMaterial({color:col('--accent'),side:THREE.DoubleSide}));
+      earthMark.position.copy(toV(earthState(pl.enc.jd).r));earthMark.rotation.x=-Math.PI/2;S.add(earthMark);
+      }
+    fitDates();
+  };
+  const isoJd=s=>jdFromISO(s+'T00:00Z');
+  function fitDates(){const pl=SELENC;jdA=P.jd1;jdEnd=(SEL&&SEL.eligible&&pl)?pl.enc.jd+30:P.jd1+3*365;setRange()}
+  function setRange(){$('#vStart').value=fmtDate(jdA);$('#vEnd').value=fmtDate(jdEnd);jdNow=jdA;playing=false;$('#playBtn').textContent='Play';$('#tSlider').value=0}
+  const onDate=()=>{const s=$('#vStart').value,e=$('#vEnd').value;if(!s||!e)return;let a=isoJd(s),b=isoJd(e);
+    if(b<=a+1){b=a+30;}jdA=a;jdEnd=b;setRange()};
+  $('#vStart').addEventListener('change',onDate);$('#vEnd').addEventListener('change',onDate);$('#vFit').onclick=fitDates;
+  $('#tSlider').oninput=e=>{jdNow=jdA+(jdEnd-jdA)*e.target.value/1000;playing=false;$('#playBtn').textContent='Play'};
+  $('#playBtn').onclick=()=>{playing=!playing;$('#playBtn').textContent=playing?'Pause':'Play';if(playing&&jdNow>=jdEnd-0.01)jdNow=jdA;lastT=performance.now()};
+  $('#resetBtn').onclick=()=>{cam.position.set(0,30,0.01);if(ctl){ctl.target.set(0,0,0)}};
+  const ray=new THREE.Raycaster(),mv=new THREE.Vector2();
+  cv.addEventListener('click',ev=>{const r=cv.getBoundingClientRect();mv.x=((ev.clientX-r.left)/r.width)*2-1;mv.y=-((ev.clientY-r.top)/r.height)*2+1;ray.setFromCamera(mv,cam);
+    const hits=ray.intersectObjects(asts.filter(o=>o.hit.visible).map(o=>o.hit));if(hits.length)select(hits[0].object.userData.a)});
+  function resize(){const r=cv.parentElement.getBoundingClientRect();R.setSize(r.width,r.height,false);cam.aspect=r.width/r.height;cam.updateProjectionMatrix()}
+  new ResizeObserver(resize).observe(cv.parentElement);resize();
+  scene.recolor=()=>{sun.material.color=col('--sun');planets.Earth.ln.material.color=col('--earth');planets.Earth.m.material.color=col('--earth');buildAsts();scene.onSelect()};
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const tmp=new THREE.Vector3();
+  function place(el,obj){const r=cv.getBoundingClientRect();tmp.copy(obj).project(cam);el.style.display=tmp.z<1?'':'none';el.style.left=((tmp.x+1)/2*r.width)+'px';el.style.top=((1-tmp.y)/2*r.height)+'px'}
+  function loop(now){requestAnimationFrame(loop);
+    if(playing){const dt=Math.min(0.1,((now||0)-lastT)/1000);lastT=now||0;jdNow+=dt*parseFloat($('#vSpeed').value);
+      if(jdNow>=jdEnd){jdNow=jdEnd;playing=false;$('#playBtn').textContent='Play'}$('#tSlider').value=(jdNow-jdA)/(jdEnd-jdA)*1000}
+    for(const nm in planets){const p=toV(state(planetEl(nm,jdNow),jdNow).r);planets[nm].m.position.copy(p);place(plab[nm],p)}
+    for(const o of asts){if(!o.m.visible){o.lab.style.display='none';continue}const p=toV(state(o.a.elA,jdNow).r);o.m.position.copy(p);o.hit.position.copy(p);o.m.scale.setScalar(o.a===SEL?1.8:1);
+      if(o.a.eligible||o.a===SEL)place(o.lab,p);else o.lab.style.display='none'}
+    $('#dateTag').textContent=fmtDate(jdNow)+(SELENC&&SEL&&SEL.eligible?' · encounter '+fmtDate(SELENC.enc.jd):'');
+    if(ctl)ctl.update();R.render(S,cam)}
+  loop();
+};
+
+/* ===================== catalogue assembly ===================== */
+function buildCatalog(){
+  const hasA=typeof ASTORB_CURATED!=='undefined';
+  const rows=CATALOG.map(c=>{const a={...c};const u=hasA&&ASTORB_CURATED[c.id];
+    if(u){const [M,w,om,i,e,ax,H]=u;a.el={a:ax,e,i,om,w,M0:M,epoch:ASTORB_EPOCH};a.anchor=null;a.H=H;a.src='astorb'}
+    return prepare(a)});
+  if(hasA)for(const r of ASTORB_CLOSE){const [num,nm,H,diam,M,w,om,i,e,ax,arc,caDate,caAU]=r;
+    const name=num?num+' '+nm:nm;const a={id:'A'+(num||nm),name,el:{a:ax,e,i,om,w,M0:M,epoch:ASTORB_EPOCH},
+      d:diam>0?diam:null,dLo:diam>0?diam*0.9:null,dHi:diam>0?diam*1.1:null,dSrc:diam>0?'IRAS':null,
+      rot:null,rotNote:'',H,anchor:null,known:[],arc,caDate,caAU,src:'astorb'};
+    rows.push(prepare(a))}
+  return rows;
+}
+
+/* ===================== boot ===================== */
+function boot(){
+  readP();ROWS=buildCatalog();analyseAll();
+  apInit();scene.init();renderList();
+  $('#listQ').addEventListener('input',renderList);$('#listSort').addEventListener('change',renderList);
+  $('#listEx').addEventListener('change',()=>{renderList();if(scene.vis)scene.vis()});
+  const first=ROWS.find(a=>a.id==='99942');select(first);
+  let tm;document.querySelectorAll('#assump input').forEach(inp=>inp.addEventListener('change',()=>{clearTimeout(tm);tm=setTimeout(()=>{
+    const id=SEL&&SEL.id;analyseAll();if(scene.rebuild){scene.rebuild()}const s=ROWS.find(a=>a.id===id)||ROWS[0];select(s)},50)}));
+  $('#importBtn').onclick=()=>{const got=parseImport($('#importBox').value);if(!got.length){$('#importMsg').textContent='No rows recognised. Check the header names or the astorb line format.';return}
+    const bad=got.filter(o=>!o.d&&!o.H);const ok=got.filter(o=>o.d||o.H).map(prepare);ROWS.push(...ok);analyseAll();if(scene.rebuild)scene.rebuild();renderList();
+    $('#importMsg').textContent=`Added ${ok.length} asteroid${ok.length===1?'':'s'} (${ok.filter(o=>o.eligible).length} eligible)${bad.length?'; skipped '+bad.length+' with no diameter or H':''}.`;select(ok[0])};
+  const mq=matchMedia('(prefers-color-scheme: dark)');const redraw=()=>{if(scene.recolor)scene.recolor();drawApproach();drawMap()};
+  mq.addEventListener?.('change',redraw);new MutationObserver(redraw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+  let rt;addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{drawApproach();drawMap()},120)});
+}
+boot();
+</script>
+
+</body></html>
